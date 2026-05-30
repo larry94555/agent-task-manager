@@ -114,25 +114,21 @@ function Task({ task, onClose, onEditName, onSendMessage, onStop, onRestart }) {
 function App() {
   const [tasks, setTasks] = useState([])
   const [nextTaskId, setNextTaskId] = useState(1)
-  const [showCreateForm, setShowCreateForm] = useState(false)
-  const [newTaskName, setNewTaskName] = useState('')
   const [selectedTaskId, setSelectedTaskId] = useState(null)
   const abortControllers = useRef({})
 
   const createTask = () => {
-    if (!newTaskName.trim()) return
     const task = {
-      id: nextTaskId,
-      name: newTaskName.trim(),
-      messages: [],
-      status: 'idle' // idle | thinking | stopped | done
+        id: nextTaskId,
+        name: `Task ${nextTaskId}`,
+        messages: [],
+        status: 'idle' // idle | thinking | stopped | done
     }
+
     setTasks(prev => [...prev, task])
     setNextTaskId(prev => prev + 1)
     setSelectedTaskId(task.id)
-    setNewTaskName('')
-    setShowCreateForm(false)
-  }
+  } 
 
   const closeTask = useCallback((taskId) => {
     setTasks(prev => prev.filter(t => t.id !== taskId))
@@ -219,33 +215,11 @@ function App() {
       <header className="app-header">
         <h1>SimpleAgent</h1>
         <div className="header-actions">
-          <button className="btn btn-primary" onClick={() => setShowCreateForm(true)}>
+          <button className="btn btn-primary" onClick={createTask}>
             + New Task
           </button>
         </div>
       </header>
-
-      {showCreateForm && (
-        <div className="modal-overlay" onClick={() => setShowCreateForm(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Create New Task</h2>
-            <input
-              className="modal-input"
-              placeholder="Enter task name..."
-              value={newTaskName}
-              onChange={(e) => setNewTaskName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && createTask()}
-              autoFocus
-            />
-            <div className="modal-actions">
-              <button className="btn" onClick={() => setShowCreateForm(false)}>Cancel</button>
-              <button className="btn btn-primary" onClick={createTask} disabled={!newTaskName.trim()}>
-                Create
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       <div className="main-layout">
         <aside className="task-list">
