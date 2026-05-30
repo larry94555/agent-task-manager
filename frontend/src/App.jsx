@@ -173,6 +173,7 @@ function App() {
             id: nextTaskId,
             name: `Task ${nextTaskId}`,
             messages: [],
+            conversationSummary: '',
             status: 'idle'
         }
 
@@ -218,13 +219,11 @@ function App() {
 
         const task = tasks.find((t) => t.id === taskId)
 
-        const history = (task?.messages ?? []).slice(-20)
-
         const requestBody = {
             taskId,
             taskName: task?.name ?? '',
             currentMessage: text,
-            history
+            conversationSummary: task?.conversationSummary ?? ''
         }
 
         try {
@@ -239,8 +238,12 @@ function App() {
                 throw new Error(`HTTP ${response.status}`)
             }
 
-            const aiResponse = await response.text()
-            const aiMessage = { role: 'assistant', content: aiResponse }
+            const result = await response.json()
+
+            const aiMessage = {
+                role: 'assistant',
+                content: result.content
+            }
 
             setTasks((prev) =>
                 prev.map((t) =>
@@ -248,6 +251,7 @@ function App() {
                         ? {
                             ...t,
                             messages: [...t.messages, aiMessage],
+                            conversationSummary: result.updatedSummary ?? t.conversationSummary,
                             status: 'done'
                         }
                         : t

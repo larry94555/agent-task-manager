@@ -4,18 +4,10 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class ChatRequest {
-    private Integer taskId;
     private String taskName;
     private String currentMessage;
-    private List<ChatMessage> history = new ArrayList<>();
-
-    public Integer getTaskId() {
-        return taskId;
-    }
-
-    public void setTaskId(Integer taskId) {
-        this.taskId = taskId;
-    }
+    private String conversationSummary;
+    private List<ChatMessage> recentMessages = new ArrayList<>();
 
     public String getTaskName() {
         return taskName;
@@ -33,12 +25,20 @@ public class ChatRequest {
         this.currentMessage = currentMessage;
     }
 
-    public List<ChatMessage> getHistory() {
-        return history;
+    public String getConversationSummary() {
+        return conversationSummary;
     }
 
-    public void setHistory(List<ChatMessage> history) {
-        this.history = history;
+    public void setConversationSummary(String conversationSummary) {
+        this.conversationSummary = conversationSummary;
+    }
+
+    public List<ChatMessage> getRecentMessages() {
+        return recentMessages;
+    }
+
+    public void setRecentMessages(List<ChatMessage> recentMessages) {
+        this.recentMessages = recentMessages;
     }
 
     public static class ChatMessage {
