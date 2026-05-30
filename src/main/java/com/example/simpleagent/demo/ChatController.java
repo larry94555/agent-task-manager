@@ -18,18 +18,26 @@ public class ChatController {
     @Autowired
     private LlamaServerManager llamaServer;
 
-     //Start llama-server manually: llama-server -m /path/to/model.gguf --host 127.0.0.1 --port 8081
     @PostMapping("/chat")
     public ResponseEntity<String> chat(@RequestBody ChatRequest request) {
-        if (request.getText() == null || request.getText().trim().isEmpty()) {
-            return ResponseEntity.badRequest().body("Text parameter is required");
+        if (request.getCurrentMessage() == null || request.getCurrentMessage().trim().isEmpty()) {
+            return ResponseEntity.badRequest().body("currentMessage parameter is required");
         }
 
-        log.info("Processing chat request with text length: {}", request.getText().length());
-        String response = llamaServer.chat(request.getText());
+        int historySize = request.getHistory() == null ? 0 : request.getHistory().size();
+
+        log.info(
+                "Processing chat request. taskId={}, taskName={}, currentMessageLength={}, historySize={}",
+                request.getTaskId(),
+                request.getTaskName(),
+                request.getCurrentMessage().length(),
+                historySize);
+
+        String response = llamaServer.chat(
+                request.getCurrentMessage(),
+                request.getHistory(),
+                request.getTaskName());
+
         return ResponseEntity.ok(response);
-       
     }
 }
-
-
