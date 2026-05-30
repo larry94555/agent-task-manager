@@ -347,7 +347,7 @@ function App() {
                         <Task
                             key={selectedTask.id}
                             task={selectedTask}
-                            onClose={closeTaskView}
+                            onClose={closeTask}
                             onEditName={editTaskName}
                             onSendMessage={sendMessage}
                             onStop={stopThinking}
