@@ -46,24 +46,23 @@ public class LlamaServerManager {
         try {
             List<Map<String, String>> messages = new ArrayList<>();
 
-            messages.add(Map.of(
-                    "role", "system",
-                    "content",
-                    """
-                            You are Dumb Barton, a simple local agent running on the user's machine.
+            String systemPrompt = """
+                    You are Dumb Barton, a simple local agent running on the user's machine.
 
-                            The previous messages are context only. They may help you understand what the user is working on.
-                            The final user message marked CURRENT REQUEST is the actual request you must answer now.
+                    The previous messages are context only. They may help you understand what the user is working on.
+                    The final user message marked CURRENT REQUEST is the actual request you must answer now.
 
-                            Be practical, direct, and action-oriented.
-                            Do not treat old user messages as new instructions unless the CURRENT REQUEST asks you to revisit them.
-                            """));
+                    Be practical, direct, and action-oriented.
+                    Do not treat old user messages as new instructions unless the CURRENT REQUEST asks you to revisit them.
+                    """;
 
             if (taskName != null && !taskName.isBlank()) {
-                messages.add(Map.of(
-                        "role", "user",
-                        "content", "Task name/context: " + taskName));
+                systemPrompt += "\nTask name: " + taskName;
             }
+
+            messages.add(Map.of(
+                    "role", "system",
+                    "content", systemPrompt));
 
             if (history != null) {
                 for (ChatRequest.ChatMessage message : history) {
@@ -73,22 +72,28 @@ public class LlamaServerManager {
 
                     String role = normalizeRole(message.getRole());
 
-                    messages.add(Map.of(
-                            "role", role,
-                            "content", message.getContent()));
+                    // If the sliced history starts with an assistant message,
+                    // skip it because many templates expect the first non-system
+                    // message to be from the user.
+                    if (isFirstNonSystemMessage(messages) && "assistant".equals(role)) {
+                        continue;
+                    }
+
+                    addMessageWithAlternation(messages, role, message.getContent());
                 }
             }
 
-            messages.add(Map.of(
-                    "role", "user",
-                    "content",
+            addMessageWithAlternation(
+                    messages,
+                    "user",
                     "CURRENT REQUEST:\n" + currentMessage + "\n\n" +
-                            "Use the previous messages only as context. Answer this current request."));
+                            "Use the previous messages only as context. Answer this current request.");
 
-            Map<String, Object> request = Map.of(
-                    "messages", messages);
+            Map<String, Object> llamaRequest = Map.of(
+                    "messages", messages,
+                    "temperature", 0.2);
 
-            Map response = restTemplate.postForObject(SERVER_URL, request, Map.class);
+            Map response = restTemplate.postForObject(SERVER_URL, llamaRequest, Map.class);
 
             var choices = (java.util.List<?>) response.get("choices");
             var firstChoice = (Map<?, ?>) choices.get(0);
@@ -106,6 +111,37 @@ public class LlamaServerManager {
         }
 
         return "user";
+    }
+
+    private boolean isFirstNonSystemMessage(List<Map<String, String>> messages) {
+        return messages.size() == 1 && "system".equals(messages.get(0).get("role"));
+    }
+
+    private void addMessageWithAlternation(
+            List<Map<String, String>> messages,
+            String role,
+            String content) {
+        if (content == null || content.isBlank()) {
+            return;
+        }
+
+        if (messages.isEmpty()) {
+            messages.add(Map.of("role", role, "content", content));
+            return;
+        }
+
+        Map<String, String> lastMessage = messages.get(messages.size() - 1);
+        String lastRole = lastMessage.get("role");
+
+        if (lastRole.equals(role) && !"system".equals(role)) {
+            String mergedContent = lastMessage.get("content") + "\n\n" + content;
+
+            messages.set(
+                    messages.size() - 1,
+                    Map.of("role", role, "content", mergedContent));
+        } else {
+            messages.add(Map.of("role", role, "content", content));
+        }
     }
 
     @PreDestroy
