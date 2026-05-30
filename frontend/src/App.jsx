@@ -183,13 +183,6 @@ function App() {
     }
 
     const closeTask = useCallback((taskId) => {
-        setTasks((prev) => prev.filter((t) => t.id !== taskId))
-
-        if (abortControllers.current[taskId]) {
-            abortControllers.current[taskId].abort()
-            delete abortControllers.current[taskId]
-        }
-
         setSelectedTaskId((prev) => (prev === taskId ? null : prev))
     }, [])
 
@@ -286,9 +279,6 @@ function App() {
     }, [tasks])
 
     const stopThinking = useCallback((taskId) => {
-        if (abortControllers.current[taskId]) {
-            abortControllers.current[taskId].abort()
-        }
     }, [])
 
     const restartTask = useCallback((taskId) => {
@@ -357,37 +347,39 @@ function App() {
                         <Task
                             key={selectedTask.id}
                             task={selectedTask}
-                            onClose={closeTask}
+                            onClose={closeTaskView}
                             onEditName={editTaskName}
                             onSendMessage={sendMessage}
                             onStop={stopThinking}
                             onRestart={restartTask}
                         />
+                    ) : tasks.length > 0 ? (
+                        <div className="task-picker">
+                            <h2>Select an agent task</h2>
+                            <p>Choose an existing task or create a new one.</p>
+
+                            <div className="task-picker-grid">
+                                {tasks.map((task) => (
+                                    <button
+                                        key={task.id}
+                                        className="task-picker-card"
+                                        onClick={() => setSelectedTaskId(task.id)}
+                                    >
+                                        <span className="task-picker-name">{task.name}</span>
+                                        <span className={`task-status status-${task.status}`}>
+                                            {task.status === 'thinking'
+                                                ? '● Thinking'
+                                                : task.status === 'stopped'
+                                                    ? '⏸ Stopped'
+                                                    : 'Open'}
+                                        </span>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
                     ) : (
                         <div className="no-task-selected">
-                            <img
-                                className="no-task-hero"
-                                src={agentTaskImage}
-                                alt="AI agent hub connected to goals, questions, and task cards"
-                            />
-
-                            <div className="empty-state-badge">Local agent workspace</div>
-
-                            <h2>Give Dumb Barton a goal.</h2>
-
-                            <p>
-                                Create an agent task, then ask a question, define an objective,
-                                or give a concrete instruction. This is not just a chat window —
-                                it is a workspace for directing a local agent running on your
-                                machine.
-                            </p>
-
-                            <button
-                                className="btn btn-primary empty-state-button"
-                                onClick={createTask}
-                            >
-                                Create Agent Task
-                            </button>
+                            ...
                         </div>
                     )}
                 </main>
