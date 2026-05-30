@@ -379,7 +379,29 @@ function App() {
                         </div>
                     ) : (
                         <div className="no-task-selected">
-                            ...
+                            <img
+                                className="no-task-hero"
+                                src={agentTaskImage}
+                                alt="AI agent hub connected to goals, questions, and task cards"
+                            />
+
+                            <div className="empty-state-badge">Local agent workspace</div>
+
+                            <h2>Give Dumb Barton a goal.</h2>
+
+                            <p>
+                                Create an agent task, then ask a question, define an objective,
+                                or give a concrete instruction. This is not just a chat window —
+                                it is a workspace for directing a local agent running on your
+                                machine.
+                            </p>
+
+                            <button
+                                className="btn btn-primary empty-state-button"
+                                onClick={createTask}
+                            >
+                                Create Agent Task
+                            </button>
                         </div>
                     )}
                 </main>
