@@ -25,16 +25,12 @@ public class ChatController {
                     new ChatResponse("currentMessage parameter is required", request.getConversationSummary()));
         }
 
-        int recentMessageCount = request.getRecentMessages() == null
-                ? 0
-                : request.getRecentMessages().size();
-
         log.info(
-                "Processing agent request. taskName={}, currentMessageLength={}, summaryLength={}, recentMessages={}",
+                "Processing agent request. taskId={}, taskName={}, currentMessageLength={}, summaryLength={}",
+                request.getTaskId(),
                 request.getTaskName(),
                 request.getCurrentMessage().length(),
-                request.getConversationSummary() == null ? 0 : request.getConversationSummary().length(),
-                recentMessageCount);
+                request.getConversationSummary() == null ? 0 : request.getConversationSummary().length());
 
         ChatResponse response = llamaServer.chat(request);
 

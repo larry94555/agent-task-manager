@@ -58,7 +58,7 @@ public class LlamaServerManager {
         String systemPrompt = """
                 You are Dumb Barton, a simple local agent running on the user's machine.
 
-                The conversation summary and recent messages are context only.
+                The conversation summary is context only.
                 The final user message marked CURRENT REQUEST is the actual request you must answer now.
 
                 Be practical, direct, and action-oriented.
@@ -75,31 +75,11 @@ public class LlamaServerManager {
         }
 
         messages.add(Map.of(
-                "role", "system",
-                "content", systemPrompt));
-
-        if (request.getRecentMessages() != null) {
-            for (ChatRequest.ChatMessage message : request.getRecentMessages()) {
-                if (message == null || message.getContent() == null || message.getContent().isBlank()) {
-                    continue;
-                }
-
-                String role = normalizeRole(message.getRole());
-
-                if (isFirstNonSystemMessage(messages) && "assistant".equals(role)) {
-                    continue;
-                }
-
-                addMessageWithAlternation(messages, role, message.getContent());
-            }
-        }
-
-        addMessageWithAlternation(
-                messages,
+                "role",
                 "user",
-                "CURRENT REQUEST:\n" + request.getCurrentMessage() + "\n\n" +
-                        "Use the conversation summary and recent messages only as context. " +
-                        "Answer this current request.");
+                "content",
+                "CURRENT REQUEST:\n" + request.getCurrentMessage() + "\n\n"
+                        + "Use the conversation summary only as background context. Answer this current request."));
 
         Map<String, Object> llamaRequest = Map.of(
                 "messages", messages,
@@ -168,45 +148,6 @@ public class LlamaServerManager {
         var responseMessage = (Map<?, ?>) firstChoice.get("message");
 
         return String.valueOf(responseMessage.get("content"));
-    }
-
-    private String normalizeRole(String role) {
-        if ("assistant".equals(role)) {
-            return "assistant";
-        }
-
-        return "user";
-    }
-
-    private boolean isFirstNonSystemMessage(List<Map<String, String>> messages) {
-        return messages.size() == 1 && "system".equals(messages.get(0).get("role"));
-    }
-
-    private void addMessageWithAlternation(
-            List<Map<String, String>> messages,
-            String role,
-            String content) {
-        if (content == null || content.isBlank()) {
-            return;
-        }
-
-        if (messages.isEmpty()) {
-            messages.add(Map.of("role", role, "content", content));
-            return;
-        }
-
-        Map<String, String> lastMessage = messages.get(messages.size() - 1);
-        String lastRole = lastMessage.get("role");
-
-        if (lastRole.equals(role) && !"system".equals(role)) {
-            String mergedContent = lastMessage.get("content") + "\n\n" + content;
-
-            messages.set(
-                    messages.size() - 1,
-                    Map.of("role", role, "content", mergedContent));
-        } else {
-            messages.add(Map.of("role", role, "content", content));
-        }
     }
 
     @PreDestroy
