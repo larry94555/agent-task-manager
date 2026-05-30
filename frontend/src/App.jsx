@@ -1,5 +1,6 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import './App.css'
+import agentTaskImage from './assets/agent-task-orchestration.png'
 
 const API_URL = '/api/chat'
 
@@ -7,7 +8,25 @@ function Task({ task, onClose, onEditName, onSendMessage, onStop, onRestart }) {
     const [inputText, setInputText] = useState('')
     const [editingName, setEditingName] = useState(false)
     const [nameDraft, setNameDraft] = useState(task.name)
+    const messagesRef = useRef(null)
     const messagesEndRef = useRef(null)
+    const shouldAutoScrollRef = useRef(true)
+
+    const handleMessagesScroll = () => {
+        const el = messagesRef.current
+        if (!el) return
+
+        const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+
+        // If user is within 80px of the bottom, keep auto-scroll enabled.
+        shouldAutoScrollRef.current = distanceFromBottom < 80
+    }
+
+    useEffect(() => {
+        if (shouldAutoScrollRef.current) {
+            messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+        }
+    }, [task.messages.length, task.status])
 
     const handleSend = () => {
         if (!inputText.trim() || task.status === 'thinking') return
@@ -67,7 +86,7 @@ function Task({ task, onClose, onEditName, onSendMessage, onStop, onRestart }) {
                 </div>
             </div>
 
-            <div className="messages">
+            <div className="messages" ref={messagesRef} onScroll={handleMessagesScroll}>
                 {task.messages.length === 0 && (
                     <div className="empty-chat">No messages yet. Start the conversation!</div>
                 )}
@@ -257,8 +276,18 @@ function App() {
                         />
                     ) : (
                         <div className="no-task-selected">
-                            <div className="no-task-icon">💬</div>
-                            <p>Select a task or create a new one to start chatting</p>
+                            <img
+                                className="no-task-hero"
+                                src={agentTaskImage}
+                                alt="AI agents connected to goals, questions, and task cards"
+                            />
+
+                            <h2>Give an agent a goal</h2>
+
+                            <p>
+                                Create a task, then give the agent a question, objective, or outcome to work toward.
+                                This workspace is designed for directing agents, not just chatting.
+                            </p>
                         </div>
                     )}
                 </main>
