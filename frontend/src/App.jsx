@@ -92,13 +92,13 @@ function Task({ task, onClose, onEditName, onSendMessage, onStop, onRestart }) {
                 )}
                 {task.messages.map((msg, idx) => (
                     <div key={idx} className={`message message-${msg.role}`}>
-                        <div className="message-label">{msg.role === 'user' ? 'You' : 'AI'}</div>
+                        <div className="message-label">{msg.role === 'user' ? 'Instruction' : 'Agent'}</div>
                         <div className="message-content">{msg.content}</div>
                     </div>
                 ))}
                 {task.status === 'thinking' && (
                     <div className="message message-assistant thinking">
-                        <div className="message-label">AI</div>
+                       <div className="message-label">Agent</div>
                         <div className="thinking-dots">
                             <span>thinking</span>
                             <span className="dot-pulse">...</span>
@@ -111,7 +111,7 @@ function Task({ task, onClose, onEditName, onSendMessage, onStop, onRestart }) {
             <div className="input-area">
                 <textarea
                     className="message-input"
-                    placeholder={task.status === 'thinking' ? 'Waiting for response...' : 'Type your message...'}
+                    placeholder={task.status === 'thinking' ? 'Waiting for response...' : 'Ask a question or give the agent a goal...'}
                     value={inputText}
                     onChange={(e) => setInputText(e.target.value)}
                     onKeyDown={handleKeyDown}
@@ -232,19 +232,31 @@ function App() {
     return (
         <div className="app">
             <header className="app-header">
-                <h1>SimpleAgent</h1>
+                <div className="brand">
+                    <div className="brand-mark">DB</div>
+
+                    <div className="brand-copy">
+                        <h1>Dumb Barton</h1>
+                        <p>The simple agent that runs locally on your machine.</p>
+                    </div>
+                </div>
+
                 <div className="header-actions">
-                    <button className="btn btn-primary" onClick={createTask}>
-                        + New Task
+                    <button className="btn btn-primary" onClick={() => setShowCreateForm(true)}>
+                        + New Agent Task
                     </button>
                 </div>
             </header>
 
             <div className="main-layout">
                 <aside className="task-list">
-                    <h2>Tasks</h2>
+                    <h2>Agent Tasks</h2>
                     {openTasks.length === 0 ? (
-                        <div className="no-tasks">No tasks yet. Create one to get started!</div>
+                        <div className="no-tasks">
+                            No agent tasks yet.
+                            <br />
+                            Create one and give Dumb Barton a goal.
+                        </div>
                     ) : (
                         <ul>
                             {openTasks.map(task => (
@@ -275,24 +287,31 @@ function App() {
                             onRestart={restartTask}
                         />
                     ) : (
-                        <div className="no-task-selected">
+                        < div className="no-task-selected">
                             <img
                                 className="no-task-hero"
-                                src={agentTaskImage}
-                                alt="AI agents connected to goals, questions, and task cards"
+                                src={agentHeroImage}
+                                alt="AI agent hub connected to goals, questions, and task cards"
                             />
 
-                            <h2>Give an agent a goal</h2>
+                            <div className="empty-state-badge">Local agent workspace</div>
+
+                            <h2>Give Dumb Barton a goal.</h2>
 
                             <p>
-                                Create a task, then give the agent a question, objective, or outcome to work toward.
-                                This workspace is designed for directing agents, not just chatting.
+                                Create an agent task, then ask a question, define an objective, or give a concrete
+                                instruction. This is not just a chat window — it is a workspace for directing a
+                                local agent running on your machine.
                             </p>
+
+                            <button className="btn btn-primary empty-state-button" onClick={() => setShowCreateForm(true)}>
+                                Create Agent Task
+                            </button>
                         </div>
                     )}
                 </main>
-            </div>
-        </div>
+            </div >
+        </div >
     )
 }
 
