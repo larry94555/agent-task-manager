@@ -19,24 +19,20 @@ public class ChatController {
     private LlamaServerManager llamaServer;
 
     @PostMapping("/chat")
-    public ResponseEntity<String> chat(@RequestBody ChatRequest request) {
+    public ResponseEntity<ChatResponse> chat(@RequestBody ChatRequest request) {
         if (request.getCurrentMessage() == null || request.getCurrentMessage().trim().isEmpty()) {
-            return ResponseEntity.badRequest().body("currentMessage parameter is required");
+            return ResponseEntity.badRequest().body(
+                    new ChatResponse("currentMessage parameter is required", request.getConversationSummary()));
         }
 
-        int historySize = request.getHistory() == null ? 0 : request.getHistory().size();
-
         log.info(
-                "Processing chat request. taskId={}, taskName={}, currentMessageLength={}, historySize={}",
+                "Processing agent request. taskId={}, taskName={}, currentMessageLength={}, summaryLength={}",
                 request.getTaskId(),
                 request.getTaskName(),
                 request.getCurrentMessage().length(),
-                historySize);
+                request.getConversationSummary() == null ? 0 : request.getConversationSummary().length());
 
-        String response = llamaServer.chat(
-                request.getCurrentMessage(),
-                request.getHistory(),
-                request.getTaskName());
+        ChatResponse response = llamaServer.chat(request);
 
         return ResponseEntity.ok(response);
     }

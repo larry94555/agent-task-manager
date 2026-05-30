@@ -1,13 +1,10 @@
 package com.example.simpleagent.demo;
 
-import java.util.ArrayList;
-import java.util.List;
-
 public class ChatRequest {
     private Integer taskId;
     private String taskName;
     private String currentMessage;
-    private List<ChatMessage> history = new ArrayList<>();
+    private String conversationSummary;
 
     public Integer getTaskId() {
         return taskId;
@@ -33,32 +30,11 @@ public class ChatRequest {
         this.currentMessage = currentMessage;
     }
 
-    public List<ChatMessage> getHistory() {
-        return history;
+    public String getConversationSummary() {
+        return conversationSummary;
     }
 
-    public void setHistory(List<ChatMessage> history) {
-        this.history = history;
-    }
-
-    public static class ChatMessage {
-        private String role;
-        private String content;
-
-        public String getRole() {
-            return role;
-        }
-
-        public void setRole(String role) {
-            this.role = role;
-        }
-
-        public String getContent() {
-            return content;
-        }
-
-        public void setContent(String content) {
-            this.content = content;
-        }
+    public void setConversationSummary(String conversationSummary) {
+        this.conversationSummary = conversationSummary;
     }
 }
