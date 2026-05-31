@@ -1,0 +1,4 @@
+1,TASK,NEW_NAME="task 1",REF="agent"
+2,POST_AND_WAIT,TEXT="What is your name",REF="agent"
+3,POST_AND_WAIT,TEXT="Your name is Joe.",REF="agent"
+4,POST_AND_WAIT,TEXT="What is your name?",REF="agent"
