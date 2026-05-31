@@ -139,6 +139,7 @@ body {
   list-style: none;
   overflow-y: auto;
   flex: 1;
+  min-height: 0;
 }
 
 .task-list-item {
@@ -235,8 +236,7 @@ body {
   margin-bottom: 22px;
   opacity: 0.96;
   filter:
-    drop-shadow(0 26px 72px rgba(56, 189, 248, 0.16))
-    drop-shadow(0 8px 28px rgba(139, 92, 246, 0.12));
+    drop-shadow(0 26px 72px rgba(56, 189, 248, 0.16)) drop-shadow(0 8px 28px rgba(139, 92, 246, 0.12));
 }
 
 .empty-state-badge {
@@ -395,6 +395,7 @@ body {
 }
 
 @keyframes pulse {
+
   0%,
   100% {
     opacity: 0.35;

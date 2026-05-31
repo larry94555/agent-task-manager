@@ -1,0 +1,87 @@
+.script-runner {
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+
+.script-runner-header {
+  font-size: 0.76rem;
+  margin-bottom: 12px;
+  color: var(--text-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-weight: 800;
+}
+
+.btn-load-script {
+  width: 100%;
+  background: rgba(56, 189, 248, 0.1);
+  color: var(--primary);
+  border-color: rgba(56, 189, 248, 0.3);
+  padding: 10px 14px;
+  font-size: 0.86rem;
+  border-radius: 12px;
+  cursor: pointer;
+  font-weight: 700;
+  transition: background 0.18s ease, opacity 0.18s ease;
+  border-style: solid;
+  border-width: 1px;
+}
+
+.btn-load-script:hover:not(:disabled) {
+  background: rgba(56, 189, 248, 0.18);
+}
+
+.btn-load-script:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.script-filename {
+  margin-top: 8px;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.script-errors {
+  margin-top: 10px;
+  background: rgba(251, 113, 133, 0.08);
+  border: 1px solid rgba(251, 113, 133, 0.28);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.script-errors-title {
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--danger);
+  margin-bottom: 6px;
+}
+
+.script-error-item {
+  font-size: 0.78rem;
+  color: #fecdd3;
+  line-height: 1.5;
+}
+
+.script-status {
+  margin-top: 10px;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+  padding: 7px 10px;
+  background: rgba(15, 23, 42, 0.6);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
+.script-status--running {
+  color: var(--warning);
+  border-color: rgba(251, 191, 36, 0.25);
+  background: rgba(251, 191, 36, 0.06);
+}

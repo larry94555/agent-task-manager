@@ -1,6 +1,8 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import './App.css'
 import agentTaskImage from './assets/agent-task-orchestration.png'
+import { useScriptRunner, makeUniqueName } from './useScriptRunner'
+import { ScriptRunner } from './ScriptRunner'
 
 const API_URL = '/api/chat'
 
@@ -165,31 +167,41 @@ function App() {
     const [tasks, setTasks] = useState([])
     const [nextTaskId, setNextTaskId] = useState(1)
     const [selectedTaskId, setSelectedTaskId] = useState(null)
+    const [scriptStatus, setScriptStatus] = useState('')
 
     const abortControllers = useRef({})
 
-    const createTask = () => {
-        const task = {
-            id: nextTaskId,
-            name: `Task ${nextTaskId}`,
-            messages: [],
-            conversationSummary: '',
-            status: 'idle'
-        }
-
-        setTasks((prev) => [...prev, task])
-        setNextTaskId((prev) => prev + 1)
-        setSelectedTaskId(task.id)
+       const createTask = () => {
+        setTasks((prev) => {
+            const desiredName = `Task ${nextTaskId}`
+            const finalName = makeUniqueName(desiredName, prev.map((t) => t.name))
+            const task = {
+                id: nextTaskId,
+                name: finalName,
+                messages: [],
+                conversationSummary: '',
+                status: 'idle'
+            }
+            setNextTaskId((n) => n + 1)
+            setSelectedTaskId(task.id)
+            return [...prev, task]
+        })
     }
 
     const closeTask = useCallback((taskId) => {
         setSelectedTaskId((prev) => (prev === taskId ? null : prev))
     }, [])
 
-    const editTaskName = useCallback((taskId, newName) => {
-        setTasks((prev) =>
-            prev.map((t) => (t.id === taskId ? { ...t, name: newName } : t))
-        )
+       const editTaskName = useCallback((taskId, newName) => {
+        setTasks((prev) => {
+            const thisTask = prev.find((t) => t.id === taskId)
+            // Allow pure case-change on the same task without triggering dedup
+            const othersNames = prev
+                .filter((t) => t.id !== taskId)
+                .map((t) => t.name)
+            const finalName = makeUniqueName(newName, othersNames)
+            return prev.map((t) => (t.id === taskId ? { ...t, name: finalName } : t))
+        })
     }, [])
 
     const sendMessage = useCallback(async (taskId, text) => {
@@ -289,6 +301,15 @@ function App() {
 
     const selectedTask = tasks.find((t) => t.id === selectedTaskId)
 
+    const { runScript } = useScriptRunner({
+        tasks,
+        setTasks,
+        nextTaskId,
+        setNextTaskId,
+        sendMessage,
+        setScriptStatus
+    })
+
     return (
         <div className="app">
             <header className="app-header">
@@ -340,6 +361,10 @@ function App() {
                             ))}
                         </ul>
                     )}
+                    <ScriptRunner
+                        onRun={runScript}
+                        scriptStatus={scriptStatus}
+                    />
                 </aside>
 
                 <main className="chat-area">
