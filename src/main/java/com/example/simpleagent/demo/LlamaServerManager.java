@@ -56,34 +56,30 @@ public class LlamaServerManager {
         List<Map<String, String>> messages = new ArrayList<>();
 
         String systemPrompt = """
-                You are Dumb Barton, a simple local agent running on the user's machine.
+                You are a local agent assistant.
 
-                The conversation summary is persistent task memory.
-                It may contain user preferences, standing instructions, aliases, decisions, constraints, and facts from earlier in the task.
-
-                The CURRENT REQUEST is the request you must answer now.
-                Use the conversation summary to interpret and answer the CURRENT REQUEST.
-
-                If the summary contains a standing instruction or remembered fact, follow it unless the CURRENT REQUEST clearly changes it.
-                Be practical, direct, and action-oriented.
+                Below is a memory of facts and instructions from earlier in this task.
+                Always check this memory before answering. If the memory contains the
+                answer to the user's question, or an instruction about how to answer,
+                that memory is the source of truth and overrides anything you would
+                otherwise say, including facts about your own identity or name.
                 """;
 
-        if (request.getTaskName() != null && !request.getTaskName().isBlank()) {
-            systemPrompt += "\nTask name: " + request.getTaskName();
+        if (request.getConversationSummary() != null && !request.getConversationSummary().isBlank()) {
+            systemPrompt += "\n\nMEMORY:\n" + request.getConversationSummary();
         }
 
-        if (request.getConversationSummary() != null && !request.getConversationSummary().isBlank()) {
-            systemPrompt += "\n\nConversation summary. This is context only:\n"
-                    + request.getConversationSummary();
+        if (request.getTaskName() != null && !request.getTaskName().isBlank()) {
+            systemPrompt += "\n\nTask name: " + request.getTaskName();
         }
 
         messages.add(Map.of(
                 "role",
                 "user",
                 "content",
-                "CURRENT REQUEST:\n" + request.getCurrentMessage() + "\n\n"
-                        + "Use the conversation summary as persistent task memory. " +
-                        "Answer this current request."));
+                "Question: " + request.getCurrentMessage() + "\n\n"
+                        + "Check the MEMORY above first. If it answers this question "
+                        + "or tells you how to answer, use it."));
 
         Map<String, Object> llamaRequest = Map.of(
                 "messages", messages,
