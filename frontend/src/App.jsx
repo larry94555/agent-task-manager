@@ -171,7 +171,7 @@ function App() {
 
     const abortControllers = useRef({})
 
-       const createTask = () => {
+    const createTask = () => {
         setTasks((prev) => {
             const desiredName = `Task ${nextTaskId}`
             const finalName = makeUniqueName(desiredName, prev.map((t) => t.name))
@@ -192,7 +192,7 @@ function App() {
         setSelectedTaskId((prev) => (prev === taskId ? null : prev))
     }, [])
 
-       const editTaskName = useCallback((taskId, newName) => {
+    const editTaskName = useCallback((taskId, newName) => {
         setTasks((prev) => {
             const thisTask = prev.find((t) => t.id === taskId)
             // Allow pure case-change on the same task without triggering dedup
@@ -207,28 +207,32 @@ function App() {
     const sendMessage = useCallback(async (taskId, text) => {
         const userMessage = { role: 'user', content: text }
 
+        // Capture the latest task state from inside the updater so rapid,
+        // back-to-back script calls never read a stale closure.
+        let taskName = ''
+        let conversationSummary = ''
+
         setTasks((prev) =>
-            prev.map((t) =>
-                t.id === taskId
-                    ? {
-                        ...t,
-                        messages: [...t.messages, userMessage],
-                        status: 'thinking'
-                    }
-                    : t
-            )
+            prev.map((t) => {
+                if (t.id !== taskId) return t
+                taskName = t.name
+                conversationSummary = t.conversationSummary ?? ''
+                return {
+                    ...t,
+                    messages: [...t.messages, userMessage],
+                    status: 'thinking'
+                }
+            })
         )
 
         const controller = new AbortController()
         abortControllers.current[taskId] = controller
 
-        const task = tasks.find((t) => t.id === taskId)
-
         const requestBody = {
             taskId,
-            taskName: task?.name ?? '',
+            taskName,
             currentMessage: text,
-            conversationSummary: task?.conversationSummary ?? ''
+            conversationSummary
         }
 
         try {
@@ -288,7 +292,7 @@ function App() {
         } finally {
             delete abortControllers.current[taskId]
         }
-    }, [tasks])
+    }, [])
 
     const stopThinking = useCallback((taskId) => {
     }, [])
