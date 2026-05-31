@@ -204,7 +204,7 @@ function App() {
         })
     }, [])
 
-    const sendMessage = useCallback(async (taskId, text) => {
+    const sendMessage = useCallback(async (taskId, text, summaryOverride) => {
         const userMessage = { role: 'user', content: text }
 
         // Capture the latest task state from inside the updater so rapid,
@@ -224,6 +224,13 @@ function App() {
                 }
             })
         )
+
+        // If the caller (e.g. the script runner) passed an explicit summary,
+        // use it. This avoids depending on React having committed the previous
+        // step's state update before this step runs.
+        if (summaryOverride != null) {
+            conversationSummary = summaryOverride
+        }
 
         const controller = new AbortController()
         abortControllers.current[taskId] = controller
@@ -254,18 +261,22 @@ function App() {
                 content: result.content
             }
 
+            const newSummary = result.updatedSummary ?? conversationSummary
+
             setTasks((prev) =>
                 prev.map((t) =>
                     t.id === taskId
                         ? {
                             ...t,
                             messages: [...t.messages, aiMessage],
-                            conversationSummary: result.updatedSummary ?? t.conversationSummary,
+                            conversationSummary: newSummary,
                             status: 'done'
                         }
                         : t
                 )
             )
+
+            return newSummary
         } catch (err) {
             if (err.name === 'AbortError') {
                 setTasks((prev) =>
