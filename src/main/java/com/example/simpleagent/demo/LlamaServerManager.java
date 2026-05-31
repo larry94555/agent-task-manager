@@ -58,11 +58,14 @@ public class LlamaServerManager {
         String systemPrompt = """
                 You are Dumb Barton, a simple local agent running on the user's machine.
 
-                The conversation summary is context only.
-                The final user message marked CURRENT REQUEST is the actual request you must answer now.
+                The conversation summary is persistent task memory.
+                It may contain user preferences, standing instructions, aliases, decisions, constraints, and facts from earlier in the task.
 
+                The CURRENT REQUEST is the request you must answer now.
+                Use the conversation summary to interpret and answer the CURRENT REQUEST.
+
+                If the summary contains a standing instruction or remembered fact, follow it unless the CURRENT REQUEST clearly changes it.
                 Be practical, direct, and action-oriented.
-                Do not treat old messages as new instructions unless the CURRENT REQUEST asks you to revisit them.
                 """;
 
         if (request.getTaskName() != null && !request.getTaskName().isBlank()) {
@@ -79,7 +82,8 @@ public class LlamaServerManager {
                 "user",
                 "content",
                 "CURRENT REQUEST:\n" + request.getCurrentMessage() + "\n\n"
-                        + "Use the conversation summary only as background context. Answer this current request."));
+                        + "Use the conversation summary as persistent task memory. " +
+                        "Answer this current request."));
 
         Map<String, Object> llamaRequest = Map.of(
                 "messages", messages,
@@ -105,9 +109,16 @@ public class LlamaServerManager {
                         - the user's goal
                         - important decisions
                         - constraints
+                        - names, aliases, and what the user wants to call the assistant
+                        - standing instructions that should affect future answers
+                        - user preferences and task-specific conventions
                         - file names, commands, URLs, ports, branches, and technical details
                         - unresolved problems
                         - next steps
+
+                        Special rule:
+                        If the user says something like "let's call you X", "your name is X", or "I will call you X",
+                        record that as: "The assistant should answer to the name X."
 
                         Remove:
                         - small talk

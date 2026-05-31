@@ -100,9 +100,9 @@ function Task({ task, onClose, onEditName, onSendMessage, onStop, onRestart }) {
                     <button
                         className="btn btn-close"
                         onClick={() => onClose(task.id)}
-                        title="Close task"
+                        title="Return to task list"
                     >
-                        ✕ Close
+                        ← Back to Tasks
                     </button>
                 </div>
             </div>
