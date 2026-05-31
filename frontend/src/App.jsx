@@ -100,9 +100,9 @@ function Task({ task, onClose, onEditName, onSendMessage, onStop, onRestart }) {
                     <button
                         className="btn btn-close"
                         onClick={() => onClose(task.id)}
-                        title="Close task"
+                        title="Return to task list"
                     >
-                        ✕ Close
+                        ← Back to Tasks
                     </button>
                 </div>
             </div>
@@ -183,13 +183,6 @@ function App() {
     }
 
     const closeTask = useCallback((taskId) => {
-        setTasks((prev) => prev.filter((t) => t.id !== taskId))
-
-        if (abortControllers.current[taskId]) {
-            abortControllers.current[taskId].abort()
-            delete abortControllers.current[taskId]
-        }
-
         setSelectedTaskId((prev) => (prev === taskId ? null : prev))
     }, [])
 
@@ -286,9 +279,6 @@ function App() {
     }, [tasks])
 
     const stopThinking = useCallback((taskId) => {
-        if (abortControllers.current[taskId]) {
-            abortControllers.current[taskId].abort()
-        }
     }, [])
 
     const restartTask = useCallback((taskId) => {
@@ -363,6 +353,30 @@ function App() {
                             onStop={stopThinking}
                             onRestart={restartTask}
                         />
+                    ) : tasks.length > 0 ? (
+                        <div className="task-picker">
+                            <h2>Select an agent task</h2>
+                            <p>Choose an existing task or create a new one.</p>
+
+                            <div className="task-picker-grid">
+                                {tasks.map((task) => (
+                                    <button
+                                        key={task.id}
+                                        className="task-picker-card"
+                                        onClick={() => setSelectedTaskId(task.id)}
+                                    >
+                                        <span className="task-picker-name">{task.name}</span>
+                                        <span className={`task-status status-${task.status}`}>
+                                            {task.status === 'thinking'
+                                                ? '● Thinking'
+                                                : task.status === 'stopped'
+                                                    ? '⏸ Stopped'
+                                                    : 'Open'}
+                                        </span>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
                     ) : (
                         <div className="no-task-selected">
                             <img
