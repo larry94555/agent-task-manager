@@ -5,6 +5,7 @@ import jakarta.annotation.PreDestroy;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import java.io.IOException;
@@ -58,26 +59,49 @@ public class LlamaServerManager {
                         You are a helpful assistant in an ongoing conversation.
                         The conversation history is provided as a series of lines,
                         each prefixed with either "user: " or "agent: ".
-                        Read the full history to understand the context, then answer
-                        the latest user message. Base your answer on what the user
-                        expects to hear given everything said so far.
-                        Reply with only your answer, no preamble.
+
+                        The latest message will tell you how to responsd and the context will provide
+                        additional details.
+
+                        In the latest message, you will either be given a question, a command, or given small talk.
+
+                        If latest message is a command, acknowledge that you understand and state what you will do or
+                        what you accept.  If the latest messages is a question, do your best to answer it in light of
+                        what's been discussed, previous commands, or what's true.  For a question, make sure to provide an answer in the immeidate response.  If the latest message is
+                        small talk, then response with small talk that is socially appropriate and takes
+                        into account what has been said in the context.
+
+                        In responses, try not to repeat but make sure to answer the question if possible.
+
+                        Make sure to prioritize the last commands over earlier commands.  The state may change because
+                        of information provided later that overrides the original information.  In this case, prioritize the later message over the earlier message.
+
+                        Answer the the latest message from the user but take into account the full history.
+                        As much as possible, take any assertions as the given for the response.
+
+                        Once you agree to something, then continue to agree and be consistent with previous
+                        statements that have been made.
+
+                        In replying, try to make a statement that either answers the
+                        question or do your best to provide an answer that takes into account
+                        the context provided. If you don't know the answer, say you don't know.
+
                         """));
 
         // Build a single user-turn message containing the full history + latest
         StringBuilder conversation = new StringBuilder();
 
         List<String> context = request.getContext();
+        int step = 1;
         if (context != null && !context.isEmpty()) {
-            conversation.append("Conversation so far:\n");
+            // conversation.append("Conversation so far:\n");
             for (String line : context) {
-                conversation.append(line).append("\n");
+                // conversation.append(line).append("\n");
+                conversation.append(step).append(") ").append(line).append("\n");
+                step++;
             }
-            conversation.append("\n");
         }
-
-        conversation.append("Latest user message:\n");
-        conversation.append("user: ").append(request.getLatest());
+        conversation.append(step).append(") ").append(request.getLatest()).append("\n");
 
         messages.add(Map.of(
                 "role", "user",

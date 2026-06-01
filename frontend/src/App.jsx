@@ -171,6 +171,13 @@ function App() {
 
     const abortControllers = useRef({})
 
+    // Always-current mirror of tasks, safe to read regardless of
+    // React's state-commit timing (used to build conversation context).
+    const tasksRef = useRef(tasks)
+    useEffect(() => {
+        tasksRef.current = tasks
+    }, [tasks])
+
     const createTask = () => {
         setTasks((prev) => {
             const desiredName = `Task ${nextTaskId}`
@@ -206,29 +213,30 @@ function App() {
     const sendMessage = useCallback(async (taskId, text) => {
         const userMessage = { role: 'user', content: text }
 
-        // Capture current message history inside the updater so rapid
-        // script calls always read the freshest state.
-        let priorMessages = []
-
-        setTasks((prev) =>
-            prev.map((t) => {
-                if (t.id !== taskId) return t
-                priorMessages = t.messages
-                return {
-                    ...t,
-                    messages: [...t.messages, userMessage],
-                    status: 'thinking'
-                }
-            })
-        )
-
-        const controller = new AbortController()
-        abortControllers.current[taskId] = controller
+        // Read prior messages from the always-current ref (not from the
+        // setTasks updater, whose timing is unreliable across rapid calls).
+        const currentTask = tasksRef.current.find((t) => t.id === taskId)
+        const priorMessages = currentTask ? currentTask.messages : []
 
         // Build context: all prior messages as prefixed strings
         const context = priorMessages.map((m) =>
             m.role === 'user' ? `user: ${m.content}` : `agent: ${m.content}`
         )
+
+        // Append the user message to state AND keep the ref in sync so the
+        // next script step sees it immediately.
+        setTasks((prev) => {
+            const next = prev.map((t) =>
+                t.id === taskId
+                    ? { ...t, messages: [...t.messages, userMessage], status: 'thinking' }
+                    : t
+            )
+            tasksRef.current = next
+            return next
+        })
+
+        const controller = new AbortController()
+        abortControllers.current[taskId] = controller
 
         const requestBody = {
             taskId,
@@ -255,8 +263,8 @@ function App() {
                 content: result.content
             }
 
-            setTasks((prev) =>
-                prev.map((t) =>
+            setTasks((prev) => {
+                const next = prev.map((t) =>
                     t.id === taskId
                         ? {
                             ...t,
@@ -265,7 +273,9 @@ function App() {
                         }
                         : t
                 )
-            )
+                tasksRef.current = next
+                return next
+            })
         } catch (err) {
             if (err.name === 'AbortError') {
                 setTasks((prev) =>
