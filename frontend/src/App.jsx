@@ -203,19 +203,17 @@ function App() {
         })
     }, [])
 
-    const sendMessage = useCallback(async (taskId, text, summaryOverride) => {
+    const sendMessage = useCallback(async (taskId, text) => {
         const userMessage = { role: 'user', content: text }
 
-        // Capture the latest task state from inside the updater so rapid,
-        // back-to-back script calls never read a stale closure.
-        let taskName = ''
-        let conversationSummary = ''
+        // Capture current message history inside the updater so rapid
+        // script calls always read the freshest state.
+        let priorMessages = []
 
         setTasks((prev) =>
             prev.map((t) => {
                 if (t.id !== taskId) return t
-                taskName = t.name
-                conversationSummary = t.conversationSummary ?? ''
+                priorMessages = t.messages
                 return {
                     ...t,
                     messages: [...t.messages, userMessage],
@@ -224,21 +222,18 @@ function App() {
             })
         )
 
-        // If the caller (e.g. the script runner) passed an explicit summary,
-        // use it. This avoids depending on React having committed the previous
-        // step's state update before this step runs.
-        if (summaryOverride != null) {
-            conversationSummary = summaryOverride
-        }
-
         const controller = new AbortController()
         abortControllers.current[taskId] = controller
 
+        // Build context: all prior messages as prefixed strings
+        const context = priorMessages.map((m) =>
+            m.role === 'user' ? `user: ${m.content}` : `agent: ${m.content}`
+        )
+
         const requestBody = {
             taskId,
-            taskName,
-            currentMessage: text,
-            conversationSummary
+            context,
+            latest: text
         }
 
         try {
@@ -260,22 +255,17 @@ function App() {
                 content: result.content
             }
 
-            const newSummary = result.updatedSummary ?? conversationSummary
-
             setTasks((prev) =>
                 prev.map((t) =>
                     t.id === taskId
                         ? {
                             ...t,
                             messages: [...t.messages, aiMessage],
-                            conversationSummary: newSummary,
                             status: 'done'
                         }
                         : t
                 )
             )
-
-            return newSummary
         } catch (err) {
             if (err.name === 'AbortError') {
                 setTasks((prev) =>
