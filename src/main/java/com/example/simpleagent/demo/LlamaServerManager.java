@@ -42,110 +42,52 @@ public class LlamaServerManager {
     public ChatResponse chat(ChatRequest request) {
         try {
             String answer = generateAnswer(request);
-            String updatedSummary = updateSummary(request, answer);
-
-            return new ChatResponse(answer, updatedSummary);
+            return new ChatResponse(answer);
         } catch (Exception e) {
-            return new ChatResponse(
-                    "Error communicating with llama-server: " + e.getMessage(),
-                    request.getConversationSummary());
+            return new ChatResponse("Error communicating with llama-server: " + e.getMessage());
         }
     }
 
     private String generateAnswer(ChatRequest request) {
         List<Map<String, String>> messages = new ArrayList<>();
 
-        String systemPrompt = """
-                You are a local agent assistant.
-
-                Below is a memory of facts and instructions from earlier in this task.
-                Always check this memory before answering. If the memory contains the
-                answer to the user's question, or an instruction about how to answer,
-                that memory is the source of truth and overrides anything you would
-                otherwise say, including facts about your own identity or name.
-                """;
-
-        if (request.getConversationSummary() != null && !request.getConversationSummary().isBlank()) {
-            systemPrompt += "\n\nMEMORY:\n" + request.getConversationSummary();
-        }
-
-        if (request.getTaskName() != null && !request.getTaskName().isBlank()) {
-            systemPrompt += "\n\nTask name: " + request.getTaskName();
-        }
-
-        messages.add(Map.of(
-                "role",
-                "user",
-                "content",
-                "Question: " + request.getCurrentMessage() + "\n\n"
-                        + "Check the MEMORY above first. If it answers this question "
-                        + "or tells you how to answer, use it."));
-
-        Map<String, Object> llamaRequest = Map.of(
-                "messages", messages,
-                "temperature", 0.2);
-
-        Map response = restTemplate.postForObject(SERVER_URL, llamaRequest, Map.class);
-
-        return extractMessageContent(response);
-    }
-
-    private String updateSummary(ChatRequest request, String answer) {
-        List<Map<String, String>> messages = new ArrayList<>();
-
         messages.add(Map.of(
                 "role", "system",
                 "content",
                 """
-                        You maintain a compact rolling summary for a local agent task.
-
-                        Update the summary using the old summary, the user's latest request, and the agent's latest response.
-
-                        Preserve:
-                        - the user's goal
-                        - important decisions
-                        - constraints
-                        - names, aliases, and what the user wants to call the assistant
-                        - standing instructions that should affect future answers
-                        - user preferences and task-specific conventions
-                        - file names, commands, URLs, ports, branches, and technical details
-                        - unresolved problems
-                        - next steps
-
-                        Special rule:
-                        If the user says something like "let's call you X", "your name is X", or "I will call you X",
-                        record that as: "The assistant should answer to the name X."
-
-                        Remove:
-                        - small talk
-                        - redundant phrasing
-                        - obsolete details
-                        - unnecessary wording
-
-                        Keep the summary concise but useful. Do not answer the user.
-                        Return only the updated summary.
+                        You are a helpful assistant in an ongoing conversation.
+                        The conversation history is provided as a series of lines,
+                        each prefixed with either "user: " or "agent: ".
+                        Read the full history to understand the context, then answer
+                        the latest user message. Base your answer on what the user
+                        expects to hear given everything said so far.
+                        Reply with only your answer, no preamble.
                         """));
 
-        String oldSummary = request.getConversationSummary() == null
-                ? ""
-                : request.getConversationSummary();
+        // Build a single user-turn message containing the full history + latest
+        StringBuilder conversation = new StringBuilder();
 
-        String summaryInput = "OLD SUMMARY:\n" + oldSummary + "\n\n"
-                + "LATEST USER REQUEST:\n" + request.getCurrentMessage() + "\n\n"
-                + "LATEST AGENT RESPONSE:\n" + answer + "\n\n"
-                + "Return the updated rolling summary.";
+        List<String> context = request.getContext();
+        if (context != null && !context.isEmpty()) {
+            conversation.append("Conversation so far:\n");
+            for (String line : context) {
+                conversation.append(line).append("\n");
+            }
+            conversation.append("\n");
+        }
+
+        conversation.append("Latest user message:\n");
+        conversation.append("user: ").append(request.getLatest());
 
         messages.add(Map.of(
                 "role", "user",
-                "content", summaryInput));
+                "content", conversation.toString()));
 
         Map<String, Object> llamaRequest = Map.of(
                 "messages", messages,
-                "temperature", 0.1,
-                "max_tokens", 800);
+                "temperature", 0.0);
 
         Map response = restTemplate.postForObject(SERVER_URL, llamaRequest, Map.class);
-
         return extractMessageContent(response);
     }
 

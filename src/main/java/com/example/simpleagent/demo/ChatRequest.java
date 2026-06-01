@@ -1,10 +1,11 @@
 package com.example.simpleagent.demo;
 
+import java.util.List;
+
 public class ChatRequest {
     private Integer taskId;
-    private String taskName;
-    private String currentMessage;
-    private String conversationSummary;
+    private List<String> context;
+    private String latest;
 
     public Integer getTaskId() {
         return taskId;
@@ -14,27 +15,19 @@ public class ChatRequest {
         this.taskId = taskId;
     }
 
-    public String getTaskName() {
-        return taskName;
+    public List<String> getContext() {
+        return context;
     }
 
-    public void setTaskName(String taskName) {
-        this.taskName = taskName;
+    public void setContext(List<String> context) {
+        this.context = context;
     }
 
-    public String getCurrentMessage() {
-        return currentMessage;
+    public String getLatest() {
+        return latest;
     }
 
-    public void setCurrentMessage(String currentMessage) {
-        this.currentMessage = currentMessage;
-    }
-
-    public String getConversationSummary() {
-        return conversationSummary;
-    }
-
-    public void setConversationSummary(String conversationSummary) {
-        this.conversationSummary = conversationSummary;
+    public void setLatest(String latest) {
+        this.latest = latest;
     }
 }

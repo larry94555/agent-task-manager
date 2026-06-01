@@ -179,7 +179,6 @@ function App() {
                 id: nextTaskId,
                 name: finalName,
                 messages: [],
-                conversationSummary: '',
                 status: 'idle'
             }
             setNextTaskId((n) => n + 1)
