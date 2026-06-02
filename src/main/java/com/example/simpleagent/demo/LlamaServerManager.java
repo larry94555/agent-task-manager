@@ -26,11 +26,12 @@ public class LlamaServerManager {
             // Updated command line arguments to use port 8081
             ProcessBuilder pb = new ProcessBuilder(
                     "llama-server.exe",
-                    "-hf", "unsloth/DeepSeek-R1-Distill-Llama-8B-GGUF:Q4_K_M",
+                    "-hf", "Qwen/Qwen2.5-Coder-14B-Instruct-GGUF:Q4_K_M",
                     "--port", "8081",
                     "--ctx-size", "16384",
                     "--threads", "8",
-                    "-ngl", "0");
+                    "-ngl", "0",
+                    "--jinja");
 
             pb.inheritIO();
             this.llamaProcess = pb.start();
@@ -56,35 +57,29 @@ public class LlamaServerManager {
                 "role", "system",
                 "content",
                 """
-                        You are a helpful assistant in an ongoing conversation.
-                        The conversation history is provided as a series of lines,
-                        each prefixed with either "user: " or "agent: ".
+                        You are a helpful assistant who will answer questions, take instructoins, set goals, and engage in small talk.
 
-                        The latest message will tell you how to responsd and the context will provide
-                        additional details.
+                        The following will be an exercise to test out the logic of your local LLM.
 
-                        In the latest message, you will either be given a question, a command, or given small talk.
+                        You will be given a list of statmeents that will either be "user:" or "agent:".  The last one on the list will always be "User:" and this will be the task that you focus on.  You can ignore the number and focus only on what was said.
 
-                        If latest message is a command, acknowledge that you understand and state what you will do or
-                        what you accept.  If the latest messages is a question, do your best to answer it in light of
-                        what's been discussed, previous commands, or what's true.  For a question, make sure to provide an answer in the immeidate response.  If the latest message is
-                        small talk, then response with small talk that is socially appropriate and takes
-                        into account what has been said in the context.
+                        When you are given a prompt, you will decide if this the user has given you a question, given you an instruction, given you a goal, or has engaged in small talk.  This will be the first setnence of your response.
 
-                        In responses, try not to repeat but make sure to answer the question if possible.
+                        If the user asks you a question, answer the question as you would the user.  If the user asked "are you ok", then you would answer such as "I am ...." with however you are.
 
-                        Make sure to prioritize the last commands over earlier commands.  The state may change because
-                        of information provided later that overrides the original information.  In this case, prioritize the later message over the earlier message.
+                        If the user gives you an instruction, such as, your name is Fred, then you would reply.  "Got it.  My name is Fred." or whatever instruction is given.
 
-                        Answer the the latest message from the user but take into account the full history.
-                        As much as possible, take any assertions as the given for the response.
+                        If the user gives you a goal such as "Create an application that says Hello." then either do the goal such as "Here is the application" or say what you must do first.  "I will need to plan for that goal.  Let me think it through...."
 
-                        Once you agree to something, then continue to agree and be consistent with previous
-                        statements that have been made.
+                        If the user egnages in small talk, then respond with engaging small talk so that is appropriate to the context of the conversation.
 
-                        In replying, try to make a statement that either answers the
-                        question or do your best to provide an answer that takes into account
-                        the context provided. If you don't know the answer, say you don't know.
+                        The user will provide a list of statements that will be labeled "user: " and "agent: ".  The "agent: " are statements that you can assume that you have said.  Keep this in mind when you are answering a question or engaging in small talk or resolving an ambiguity.
+
+                        So, here's an example of what you will say.
+
+                        1.  The latest message was "What is your name."
+                        2.  This is a question.
+                        3.  Here's my answer:  "I don't have a name" or "my name is Gemma" or if in the list you have been instructed to have a name, then you can say: "My name is ..." and answer as you were instructed.
 
                         """));
 

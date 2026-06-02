@@ -223,17 +223,15 @@ function App() {
             m.role === 'user' ? `user: ${m.content}` : `agent: ${m.content}`
         )
 
-        // Append the user message to state AND keep the ref in sync so the
-        // next script step sees it immediately.
-        setTasks((prev) => {
-            const next = prev.map((t) =>
-                t.id === taskId
-                    ? { ...t, messages: [...t.messages, userMessage], status: 'thinking' }
-                    : t
-            )
-            tasksRef.current = next
-            return next
-        })
+        // Compute and assign the ref synchronously, THEN update state, so the
+        // next script step always reads the latest messages immediately.
+        const afterUser = tasksRef.current.map((t) =>
+            t.id === taskId
+                ? { ...t, messages: [...t.messages, userMessage], status: 'thinking' }
+                : t
+        )
+        tasksRef.current = afterUser
+        setTasks(afterUser)
 
         const controller = new AbortController()
         abortControllers.current[taskId] = controller
@@ -241,7 +239,7 @@ function App() {
         const requestBody = {
             taskId,
             context,
-            latest: text
+            latest: `user: ${text}`
         }
 
         try {
@@ -263,19 +261,13 @@ function App() {
                 content: result.content
             }
 
-            setTasks((prev) => {
-                const next = prev.map((t) =>
-                    t.id === taskId
-                        ? {
-                            ...t,
-                            messages: [...t.messages, aiMessage],
-                            status: 'done'
-                        }
-                        : t
-                )
-                tasksRef.current = next
-                return next
-            })
+            const afterAgent = tasksRef.current.map((t) =>
+                t.id === taskId
+                    ? { ...t, messages: [...t.messages, aiMessage], status: 'done' }
+                    : t
+            )
+            tasksRef.current = afterAgent
+            setTasks(afterAgent)
         } catch (err) {
             if (err.name === 'AbortError') {
                 setTasks((prev) =>
