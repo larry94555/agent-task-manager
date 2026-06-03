@@ -325,41 +325,70 @@ function App() {
     })
   }, [])
 
-  const saveSession = useCallback(() => {
-    const currentTasks = tasksRef.current
+  const saveSession = useCallback(async () => {
+  const currentTasks = tasksRef.current
 
-    if (hasThinkingTasks(currentTasks)) {
-      window.alert('Stop or finish active agent requests before saving the session.')
+  if (hasThinkingTasks(currentTasks)) {
+    window.alert('Stop or finish active agent requests before saving the session.')
+    return
+  }
+
+  const session = {
+    app: SESSION_FILE_APP,
+    version: SESSION_FILE_VERSION,
+    savedAt: new Date().toISOString(),
+    state: {
+      tasks: currentTasks.map(normalizeTaskForSave),
+      nextTaskId,
+      selectedTaskId,
+      scriptStatus,
+    },
+  }
+
+  const suggestedName = `dumb-barton-session-${formatSessionTimestamp()}.json`
+  const sessionJson = JSON.stringify(session, null, 2)
+
+  if (typeof window.showSaveFilePicker === 'function') {
+    try {
+      const fileHandle = await window.showSaveFilePicker({
+        suggestedName,
+        types: [
+          {
+            description: 'Dumb Barton Session JSON',
+            accept: {
+              'application/json': ['.json'],
+            },
+          },
+        ],
+      })
+
+      const writable = await fileHandle.createWritable()
+      await writable.write(sessionJson)
+      await writable.close()
       return
+    } catch (err) {
+      if (err?.name === 'AbortError') {
+        return
+      }
+
+      console.warn('Save picker failed. Falling back to browser download.', err)
     }
+  }
 
-    const session = {
-      app: SESSION_FILE_APP,
-      version: SESSION_FILE_VERSION,
-      savedAt: new Date().toISOString(),
-      state: {
-        tasks: currentTasks.map(normalizeTaskForSave),
-        nextTaskId,
-        selectedTaskId,
-        scriptStatus,
-      },
-    }
+  const blob = new Blob([sessionJson], {
+    type: 'application/json',
+  })
 
-    const blob = new Blob([JSON.stringify(session, null, 2)], {
-      type: 'application/json',
-    })
-
-    const url = URL.createObjectURL(blob)
-    const anchor = document.createElement('a')
-    anchor.href = url
-    anchor.download = `dumb-barton-session-${formatSessionTimestamp()}.json`
-    document.body.appendChild(anchor)
-    anchor.click()
-    anchor.remove()
-    URL.revokeObjectURL(url)
-  }, [nextTaskId, scriptStatus, selectedTaskId])
-
-  const openLoadSessionPicker = useCallback(() => {
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = suggestedName
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  URL.revokeObjectURL(url)
+}, [nextTaskId, scriptStatus, selectedTaskId])
+const openLoadSessionPicker = useCallback(() => {
     if (hasThinkingTasks(tasksRef.current)) {
       window.alert('Stop or finish active agent requests before loading another session.')
       return
@@ -695,4 +724,5 @@ function App() {
 }
 
 export default App
+
 
