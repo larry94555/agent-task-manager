@@ -171,7 +171,14 @@ function App() {
 
     const abortControllers = useRef({})
 
-       const createTask = () => {
+    // Always-current mirror of tasks, safe to read regardless of
+    // React's state-commit timing (used to build conversation context).
+    const tasksRef = useRef(tasks)
+    useEffect(() => {
+        tasksRef.current = tasks
+    }, [tasks])
+
+    const createTask = () => {
         setTasks((prev) => {
             const desiredName = `Task ${nextTaskId}`
             const finalName = makeUniqueName(desiredName, prev.map((t) => t.name))
@@ -179,7 +186,6 @@ function App() {
                 id: nextTaskId,
                 name: finalName,
                 messages: [],
-                conversationSummary: '',
                 status: 'idle'
             }
             setNextTaskId((n) => n + 1)
@@ -192,7 +198,7 @@ function App() {
         setSelectedTaskId((prev) => (prev === taskId ? null : prev))
     }, [])
 
-       const editTaskName = useCallback((taskId, newName) => {
+    const editTaskName = useCallback((taskId, newName) => {
         setTasks((prev) => {
             const thisTask = prev.find((t) => t.id === taskId)
             // Allow pure case-change on the same task without triggering dedup
@@ -207,28 +213,33 @@ function App() {
     const sendMessage = useCallback(async (taskId, text) => {
         const userMessage = { role: 'user', content: text }
 
-        setTasks((prev) =>
-            prev.map((t) =>
-                t.id === taskId
-                    ? {
-                        ...t,
-                        messages: [...t.messages, userMessage],
-                        status: 'thinking'
-                    }
-                    : t
-            )
+        // Read prior messages from the always-current ref (not from the
+        // setTasks updater, whose timing is unreliable across rapid calls).
+        const currentTask = tasksRef.current.find((t) => t.id === taskId)
+        const priorMessages = currentTask ? currentTask.messages : []
+
+        // Build context: all prior messages as prefixed strings
+        const context = priorMessages.map((m) =>
+            m.role === 'user' ? `user: ${m.content}` : `agent: ${m.content}`
         )
+
+        // Compute and assign the ref synchronously, THEN update state, so the
+        // next script step always reads the latest messages immediately.
+        const afterUser = tasksRef.current.map((t) =>
+            t.id === taskId
+                ? { ...t, messages: [...t.messages, userMessage], status: 'thinking' }
+                : t
+        )
+        tasksRef.current = afterUser
+        setTasks(afterUser)
 
         const controller = new AbortController()
         abortControllers.current[taskId] = controller
 
-        const task = tasks.find((t) => t.id === taskId)
-
         const requestBody = {
             taskId,
-            taskName: task?.name ?? '',
-            currentMessage: text,
-            conversationSummary: task?.conversationSummary ?? ''
+            context,
+            latest: `user: ${text}`
         }
 
         try {
@@ -250,18 +261,13 @@ function App() {
                 content: result.content
             }
 
-            setTasks((prev) =>
-                prev.map((t) =>
-                    t.id === taskId
-                        ? {
-                            ...t,
-                            messages: [...t.messages, aiMessage],
-                            conversationSummary: result.updatedSummary ?? t.conversationSummary,
-                            status: 'done'
-                        }
-                        : t
-                )
+            const afterAgent = tasksRef.current.map((t) =>
+                t.id === taskId
+                    ? { ...t, messages: [...t.messages, aiMessage], status: 'done' }
+                    : t
             )
+            tasksRef.current = afterAgent
+            setTasks(afterAgent)
         } catch (err) {
             if (err.name === 'AbortError') {
                 setTasks((prev) =>
@@ -288,7 +294,7 @@ function App() {
         } finally {
             delete abortControllers.current[taskId]
         }
-    }, [tasks])
+    }, [])
 
     const stopThinking = useCallback((taskId) => {
     }, [])
