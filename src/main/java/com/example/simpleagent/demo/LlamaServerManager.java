@@ -1,4 +1,4 @@
-package com.example.simpleagent.demo;
+﻿package com.example.simpleagent.demo;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -6,29 +6,27 @@ import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.logging.Logger;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.logging.Logger;
 
 @Component
 public class LlamaServerManager {
-
     private static final Logger logger = Logger.getLogger(LlamaServerManager.class.getName());
     private static final ObjectMapper objectMapper = new ObjectMapper();
+
+    private static final String SERVER_URL = "http://localhost:8081/v1/chat/completions";
+
     private Process llamaProcess;
     private final RestTemplate restTemplate = new RestTemplate();
-
-    // Updated to point to llama-server on port 8081
-    private final String SERVER_URL = "http://localhost:8081/v1/chat/completions";
 
     @PostConstruct
     public void startLlamaServer() {
         try {
-            // Updated command line arguments to use port 8081
             ProcessBuilder pb = new ProcessBuilder(
                     "llama-server.exe",
                     "-hf", "Qwen/Qwen2.5-Coder-14B-Instruct-GGUF:Q4_K_M",
@@ -38,7 +36,8 @@ public class LlamaServerManager {
                     "--threads", "8",
                     "-ngl", "0",
                     "--alias", "qwen2.5-coder-14b",
-                    "--jinja");
+                    "--jinja"
+            );
 
             pb.inheritIO();
             this.llamaProcess = pb.start();
@@ -50,86 +49,96 @@ public class LlamaServerManager {
 
     public ChatResponse chat(ChatRequest request) {
         try {
-            String answer = generateAnswer(request);
+            String answer = complete(buildLegacyMessages(request), 0.0, 1_200);
             return new ChatResponse(answer);
         } catch (Exception e) {
             return new ChatResponse("Error communicating with llama-server: " + e.getMessage());
         }
     }
 
-    private String generateAnswer(ChatRequest request) {
-        List<Map<String, String>> messages = new ArrayList<>();
+    public String complete(List<AgentMessage> messages, double temperature, int maxTokens) {
+        List<Map<String, String>> apiMessages = new ArrayList<>();
 
-        messages.add(Map.of(
-                "role", "system",
-                "content",
-                """
-                        You are a helpful assistant who will answer questions, take instructoins, set goals, and engage in small talk.
+        for (AgentMessage message : messages) {
+            Map<String, String> apiMessage = new LinkedHashMap<>();
+            apiMessage.put("role", message.getRole());
+            apiMessage.put("content", message.getContent());
+            apiMessages.add(apiMessage);
+        }
 
-                        The following will be an exercise to test out the logic of your local LLM.
+        Map<String, Object> llamaRequest = new LinkedHashMap<>();
+        llamaRequest.put("messages", apiMessages);
+        llamaRequest.put("temperature", temperature);
+        llamaRequest.put("max_tokens", maxTokens);
 
-                        You will be given a list of statmeents that will either be "user:" or "agent:".  The last one on the list will always be "User:" and this will be the task that you focus on.  You can ignore the number and focus only on what was said.
+        logLlamaRequest(llamaRequest);
 
-                        When you are given a prompt, you will decide if this the user has given you a question, given you an instruction, given you a goal, or has engaged in small talk.  This will be the first setnence of your response.
+        Map<?, ?> response = restTemplate.postForObject(SERVER_URL, llamaRequest, Map.class);
+        return extractMessageContent(response);
+    }
 
-                        If the user asks you a question, answer the question as you would the user.  If the user asked "are you ok", then you would answer such as "I am ...." with however you are.
+    private List<AgentMessage> buildLegacyMessages(ChatRequest request) {
+        List<AgentMessage> messages = new ArrayList<>();
 
-                        If the user gives you an instruction, such as, your name is Fred, then you would reply.  "Got it.  My name is Fred." or whatever instruction is given.
+        messages.add(AgentMessage.system("""
+                You are a helpful local assistant. Use the previous conversation context when answering.
+                If the user previously gave you a name, instruction, preference, or constraint, follow it.
+                """));
 
-                        If the user gives you a goal such as "Create an application that says Hello." then either do the goal such as "Here is the application" or say what you must do first.  "I will need to plan for that goal.  Let me think it through...."
-
-                        If the user egnages in small talk, then respond with engaging small talk so that is appropriate to the context of the conversation.
-
-                        The user will provide a list of statements that will be labeled "user: " and "agent: ".  The "agent: " are statements that you can assume that you have said.  Keep this in mind when you are answering a question or engaging in small talk or resolving an ambiguity.
-
-                        So, here's an example of what you will say.
-
-                        1.  The latest message was "What is your name."
-                        2.  This is a question.
-                        3.  Here's my answer:  "I don't have a name" or "my name is Gemma" or if in the list you have been instructed to have a name, then you can say: "My name is ..." and answer as you were instructed.
-
-                        """));
-
-        // Build a single user-turn message containing the full history + latest
         StringBuilder conversation = new StringBuilder();
-
-        List<String> context = request.getContext();
+        List<?> context = request.getContext();
         int step = 1;
+
         if (context != null && !context.isEmpty()) {
-            // conversation.append("Conversation so far:\n");
-            for (String line : context) {
-                // conversation.append(line).append("\n");
-                conversation.append(step).append(") ").append(line).append("\n");
-                step++;
+            for (Object line : context) {
+                if (line != null) {
+                    conversation.append(step).append(") ").append(line).append("\n");
+                    step++;
+                }
             }
         }
+
         conversation.append(step).append(") ").append(request.getLatest()).append("\n");
+        messages.add(AgentMessage.user(conversation.toString()));
 
-        messages.add(Map.of(
-                "role", "user",
-                "content", conversation.toString()));
+        return messages;
+    }
 
-        Map<String, Object> llamaRequest = Map.of(
-                "messages", messages,
-                "temperature", 0.0);
-
+    private void logLlamaRequest(Map<String, Object> llamaRequest) {
         try {
             String prettyRequest = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(llamaRequest);
             logger.info("llamaRequest: " + System.lineSeparator() + prettyRequest);
         } catch (JsonProcessingException e) {
             logger.warning("Failed to serialize llamaRequest: " + e.getMessage());
         }
-
-        Map response = restTemplate.postForObject(SERVER_URL, llamaRequest, Map.class);
-        return extractMessageContent(response);
     }
 
-    private String extractMessageContent(Map response) {
-        var choices = (java.util.List<?>) response.get("choices");
-        var firstChoice = (Map<?, ?>) choices.get(0);
-        var responseMessage = (Map<?, ?>) firstChoice.get("message");
+    private String extractMessageContent(Map<?, ?> response) {
+        if (response == null) {
+            throw new IllegalStateException("llama-server returned no response body.");
+        }
 
-        return String.valueOf(responseMessage.get("content"));
+        Object choicesObject = response.get("choices");
+        if (!(choicesObject instanceof List<?> choices) || choices.isEmpty()) {
+            throw new IllegalStateException("llama-server response did not contain choices.");
+        }
+
+        Object firstChoiceObject = choices.get(0);
+        if (!(firstChoiceObject instanceof Map<?, ?> firstChoice)) {
+            throw new IllegalStateException("llama-server choice was not an object.");
+        }
+
+        Object messageObject = firstChoice.get("message");
+        if (!(messageObject instanceof Map<?, ?> responseMessage)) {
+            throw new IllegalStateException("llama-server choice did not contain a message object.");
+        }
+
+        Object content = responseMessage.get("content");
+        if (content == null) {
+            throw new IllegalStateException("llama-server message did not contain content.");
+        }
+
+        return String.valueOf(content);
     }
 
     @PreDestroy
