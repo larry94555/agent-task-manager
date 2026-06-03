@@ -1,5 +1,7 @@
 package com.example.simpleagent.demo;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.springframework.stereotype.Component;
@@ -7,6 +9,7 @@ import org.springframework.web.client.RestTemplate;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.logging.Logger;
 
 import java.io.IOException;
 import java.util.Map;
@@ -14,6 +17,8 @@ import java.util.Map;
 @Component
 public class LlamaServerManager {
 
+    private static final Logger logger = Logger.getLogger(LlamaServerManager.class.getName());
+    private static final ObjectMapper objectMapper = new ObjectMapper();
     private Process llamaProcess;
     private final RestTemplate restTemplate = new RestTemplate();
 
@@ -27,10 +32,12 @@ public class LlamaServerManager {
             ProcessBuilder pb = new ProcessBuilder(
                     "llama-server.exe",
                     "-hf", "Qwen/Qwen2.5-Coder-14B-Instruct-GGUF:Q4_K_M",
+                    "--host", "0.0.0.0",
                     "--port", "8081",
-                    "--ctx-size", "16384",
+                    "--ctx-size", "32768",
                     "--threads", "8",
                     "-ngl", "0",
+                    "--alias", "qwen2.5-coder-14b",
                     "--jinja");
 
             pb.inheritIO();
@@ -105,6 +112,13 @@ public class LlamaServerManager {
         Map<String, Object> llamaRequest = Map.of(
                 "messages", messages,
                 "temperature", 0.0);
+
+        try {
+            String prettyRequest = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(llamaRequest);
+            logger.info("llamaRequest: " + System.lineSeparator() + prettyRequest);
+        } catch (JsonProcessingException e) {
+            logger.warning("Failed to serialize llamaRequest: " + e.getMessage());
+        }
 
         Map response = restTemplate.postForObject(SERVER_URL, llamaRequest, Map.class);
         return extractMessageContent(response);
