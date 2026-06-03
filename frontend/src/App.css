@@ -634,3 +634,22 @@ body {
   font-size: 0.82rem;
   color: var(--text-muted);
 }
+/* Frontend-only request timing display. These values are never sent to the LLM. */
+.message-duration {
+  margin-top: 6px;
+  font-size: 0.72rem;
+  color: #8ea3c8;
+  text-align: right;
+}
+
+.message-assistant .message-duration {
+  text-align: left;
+}
+
+.thinking-duration {
+  display: inline-block;
+  margin-left: 10px;
+  font-size: 0.78rem;
+  color: #8ea3c8;
+}
+
