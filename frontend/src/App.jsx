@@ -5,6 +5,8 @@ import { useScriptRunner, makeUniqueName } from './useScriptRunner'
 import { ScriptRunner } from './ScriptRunner'
 
 const API_URL = '/api/chat'
+const SESSION_FILE_VERSION = 1
+const SESSION_FILE_APP = 'agent-task-manager'
 
 function formatDuration(ms) {
   if (ms == null || Number.isNaN(ms)) return ''
@@ -20,6 +22,86 @@ function formatDuration(ms) {
   const minutes = Math.floor(ms / 60_000)
   const seconds = Math.round((ms % 60_000) / 1000)
   return `${minutes}m ${seconds}s`
+}
+
+function formatSessionTimestamp(date = new Date()) {
+  const pad = (value) => String(value).padStart(2, '0')
+
+  return [
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate()),
+  ].join('-') + '-' + [
+    pad(date.getHours()),
+    pad(date.getMinutes()),
+    pad(date.getSeconds()),
+  ].join('')
+}
+
+function hasThinkingTasks(tasks) {
+  return tasks.some((task) => task.status === 'thinking')
+}
+
+function normalizeTaskForSave(task) {
+  return {
+    ...task,
+    requestStartedAt: null,
+  }
+}
+
+function normalizeLoadedTask(task, fallbackId) {
+  const id = Number.isFinite(Number(task?.id)) ? Number(task.id) : fallbackId
+  const name = typeof task?.name === 'string' && task.name.trim()
+    ? task.name.trim()
+    : `Task ${id}`
+
+  const allowedStatuses = new Set(['idle', 'done', 'stopped'])
+  const status = allowedStatuses.has(task?.status) ? task.status : 'idle'
+
+  const messages = Array.isArray(task?.messages)
+    ? task.messages
+        .filter((message) => message && typeof message.content === 'string')
+        .map((message) => ({
+          role: message.role === 'user' ? 'user' : 'assistant',
+          content: message.content,
+          ...(Number.isFinite(Number(message.durationMs))
+            ? { durationMs: Number(message.durationMs) }
+            : {}),
+        }))
+    : []
+
+  return {
+    id,
+    name,
+    messages,
+    status,
+    requestStartedAt: null,
+    lastDurationMs: Number.isFinite(Number(task?.lastDurationMs))
+      ? Number(task.lastDurationMs)
+      : null,
+  }
+}
+
+function validateSessionFile(session) {
+  if (!session || typeof session !== 'object') {
+    throw new Error('The selected file is not a valid session JSON object.')
+  }
+
+  if (session.app && session.app !== SESSION_FILE_APP) {
+    throw new Error(`This file is for ${session.app}, not ${SESSION_FILE_APP}.`)
+  }
+
+  if (!session.state || typeof session.state !== 'object') {
+    throw new Error('The session file is missing its state object.')
+  }
+
+  if (!Array.isArray(session.state.tasks)) {
+    throw new Error('The session file is missing its tasks array.')
+  }
+
+  if (hasThinkingTasks(session.state.tasks)) {
+    throw new Error('This session contains an in-progress request. Stop or finish active requests before saving a session.')
+  }
 }
 
 function Task({ task, onClose, onEditName, onSendMessage, onStop, onRestart }) {
@@ -198,6 +280,7 @@ function App() {
   const [selectedTaskId, setSelectedTaskId] = useState(null)
   const [scriptStatus, setScriptStatus] = useState('')
   const abortControllers = useRef({})
+  const loadSessionInputRef = useRef(null)
 
   // Always-current mirror of tasks, safe to read regardless of
   // React's state-commit timing. This is used to build LLM context.
@@ -242,6 +325,89 @@ function App() {
     })
   }, [])
 
+  const saveSession = useCallback(() => {
+    const currentTasks = tasksRef.current
+
+    if (hasThinkingTasks(currentTasks)) {
+      window.alert('Stop or finish active agent requests before saving the session.')
+      return
+    }
+
+    const session = {
+      app: SESSION_FILE_APP,
+      version: SESSION_FILE_VERSION,
+      savedAt: new Date().toISOString(),
+      state: {
+        tasks: currentTasks.map(normalizeTaskForSave),
+        nextTaskId,
+        selectedTaskId,
+        scriptStatus,
+      },
+    }
+
+    const blob = new Blob([JSON.stringify(session, null, 2)], {
+      type: 'application/json',
+    })
+
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `dumb-barton-session-${formatSessionTimestamp()}.json`
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    URL.revokeObjectURL(url)
+  }, [nextTaskId, scriptStatus, selectedTaskId])
+
+  const openLoadSessionPicker = useCallback(() => {
+    if (hasThinkingTasks(tasksRef.current)) {
+      window.alert('Stop or finish active agent requests before loading another session.')
+      return
+    }
+
+    loadSessionInputRef.current?.click()
+  }, [])
+
+  const handleLoadSessionFile = useCallback(async (event) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+
+    if (!file) return
+
+    try {
+      const text = await file.text()
+      const session = JSON.parse(text)
+      validateSessionFile(session)
+
+      const loadedTasks = session.state.tasks.map((task, index) =>
+        normalizeLoadedTask(task, index + 1)
+      )
+
+      const maxTaskId = loadedTasks.reduce((max, task) => Math.max(max, task.id), 0)
+      const loadedNextTaskId = Number.isFinite(Number(session.state.nextTaskId))
+        ? Math.max(Number(session.state.nextTaskId), maxTaskId + 1)
+        : maxTaskId + 1
+
+      const loadedSelectedTaskId = loadedTasks.some(
+        (task) => task.id === session.state.selectedTaskId
+      )
+        ? session.state.selectedTaskId
+        : null
+
+      const loadedScriptStatus = typeof session.state.scriptStatus === 'string'
+        ? session.state.scriptStatus
+        : ''
+
+      tasksRef.current = loadedTasks
+      setTasks(loadedTasks)
+      setNextTaskId(loadedNextTaskId)
+      setSelectedTaskId(loadedSelectedTaskId)
+      setScriptStatus(loadedScriptStatus)
+    } catch (err) {
+      window.alert(`Could not load session: ${err.message}`)
+    }
+  }, [])
+
   const sendMessage = useCallback(async (taskId, text) => {
     const startedAt = performance.now()
     const userMessage = { role: 'user', content: text }
@@ -251,7 +417,7 @@ function App() {
     const priorMessages = currentTask ? currentTask.messages : []
 
     // IMPORTANT:
-    // Duration metadata is intentionally NOT included here.
+    // Frontend-only metadata such as durationMs is intentionally NOT included here.
     // Only role + content are sent to the backend/LLM.
     const context = priorMessages.map((m) =>
       m.role === 'user' ? `user: ${m.content}` : `agent: ${m.content}`
@@ -387,6 +553,7 @@ function App() {
   }, [])
 
   const selectedTask = tasks.find((t) => t.id === selectedTaskId)
+  const sessionActionDisabled = hasThinkingTasks(tasks)
 
   const { runScript } = useScriptRunner({
     tasks,
@@ -409,6 +576,22 @@ function App() {
         </div>
 
         <div className="header-actions">
+          <button className="btn btn-secondary" onClick={saveSession} disabled={sessionActionDisabled}>
+            Save Session
+          </button>
+
+          <button className="btn btn-secondary" onClick={openLoadSessionPicker} disabled={sessionActionDisabled}>
+            Load Session
+          </button>
+
+          <input
+            ref={loadSessionInputRef}
+            className="session-file-input"
+            type="file"
+            accept="application/json,.json"
+            onChange={handleLoadSessionFile}
+          />
+
           <button className="btn btn-primary" onClick={createTask}>
             + New Agent Task
           </button>
