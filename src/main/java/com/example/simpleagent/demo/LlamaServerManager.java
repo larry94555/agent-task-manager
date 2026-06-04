@@ -47,15 +47,6 @@ public class LlamaServerManager {
         }
     }
 
-    public ChatResponse chat(ChatRequest request) {
-        try {
-            String answer = complete(buildLegacyMessages(request), 0.0, 1_200);
-            return new ChatResponse(answer);
-        } catch (Exception e) {
-            return new ChatResponse("Error communicating with llama-server: " + e.getMessage());
-        }
-    }
-
     public String complete(List<AgentMessage> messages, double temperature, int maxTokens) {
         List<Map<String, String>> apiMessages = new ArrayList<>();
 
@@ -75,33 +66,6 @@ public class LlamaServerManager {
 
         Map<?, ?> response = restTemplate.postForObject(SERVER_URL, llamaRequest, Map.class);
         return extractMessageContent(response);
-    }
-
-    private List<AgentMessage> buildLegacyMessages(ChatRequest request) {
-        List<AgentMessage> messages = new ArrayList<>();
-
-        messages.add(AgentMessage.system("""
-                You are a helpful local assistant. Use the previous conversation context when answering.
-                If the user previously gave you a name, instruction, preference, or constraint, follow it.
-                """));
-
-        StringBuilder conversation = new StringBuilder();
-        List<?> context = request.getContext();
-        int step = 1;
-
-        if (context != null && !context.isEmpty()) {
-            for (Object line : context) {
-                if (line != null) {
-                    conversation.append(step).append(") ").append(line).append("\n");
-                    step++;
-                }
-            }
-        }
-
-        conversation.append(step).append(") ").append(request.getLatest()).append("\n");
-        messages.add(AgentMessage.user(conversation.toString()));
-
-        return messages;
     }
 
     private void logLlamaRequest(Map<String, Object> llamaRequest) {

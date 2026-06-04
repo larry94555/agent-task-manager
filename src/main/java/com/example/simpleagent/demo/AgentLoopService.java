@@ -84,10 +84,7 @@ public class AgentLoopService {
         List<AgentMessage> messages = new ArrayList<>();
 
         messages.add(AgentMessage.system(buildSystemPrompt(request)));
-
-        List<AgentMessage> history = conversationStore.loadHistory(request);
-        messages.addAll(history);
-
+        messages.addAll(conversationStore.loadHistory(request));
         messages.add(AgentMessage.user("""
                 CURRENT REQUEST:
                 %s
@@ -99,8 +96,6 @@ public class AgentLoopService {
     }
 
     private String buildSystemPrompt(ChatRequest request) {
-        String taskContext = renderContext(request);
-
         return """
                 You are Dumb Barton, a local task agent running on the user's machine.
 
@@ -143,7 +138,7 @@ public class AgentLoopService {
                 - Be practical, direct, and concise.
                 """.formatted(
                 request.getTaskId() == null ? "(none)" : request.getTaskId(),
-                taskContext,
+                renderContext(request),
                 conversationStore.renderNotes(request),
                 actionExecutor.renderAvailableActions()
         );

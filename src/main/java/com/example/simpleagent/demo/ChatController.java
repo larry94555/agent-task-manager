@@ -21,20 +21,19 @@ public class ChatController {
 
     @PostMapping("/chat")
     public ResponseEntity<ChatResponse> chat(@RequestBody ChatRequest request) {
-        if (request.getLatest() == null || request.getLatest().trim().isEmpty()) {
+        if (request == null || request.getLatest() == null || request.getLatest().trim().isEmpty()) {
             return ResponseEntity.badRequest().body(
                     new ChatResponse("latest parameter is required")
             );
         }
 
         log.info(
-                "Processing agent request. taskId={}, contextSize={}, latestLength={}",
+                "Processing agent request through AgentLoopService. taskId={}, contextSize={}, latestLength={}",
                 request.getTaskId(),
                 request.getContext() == null ? 0 : request.getContext().size(),
-                request.getLatest() == null ? 0 : request.getLatest().length()
+                request.getLatest().length()
         );
 
-        ChatResponse response = agentLoopService.run(request);
-        return ResponseEntity.ok(response);
+        return ResponseEntity.ok(agentLoopService.run(request));
     }
 }
