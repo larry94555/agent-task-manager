@@ -76,8 +76,6 @@ export function parseScript(csvText) {
   return { steps, errors }
 }
 
-// Returns the smallest unique name given a desired base name and existing names.
-// Comparison is case-insensitive.
 export function makeUniqueName(desired, existingNames) {
   const lower = (s) => s.toLowerCase()
   const taken = new Set(existingNames.map(lower))
@@ -98,17 +96,11 @@ export function useScriptRunner({
   setScriptStatus,
 }) {
   const refMap = useRef({})
-
-  // Mirror nextTaskId into a ref so the async loop always reads the latest value.
   const nextTaskIdRef = useRef(nextTaskId)
   nextTaskIdRef.current = nextTaskId
 
   const runScript = useCallback(async (steps) => {
     refMap.current = {}
-
-    // Track the running summary per ref so each step feeds context to the next
-    // when the backend supports summary return values. Harmless when unused.
-    const summaryByRef = {}
 
     for (const step of steps) {
       if (step.action === 'TASK') {
@@ -116,17 +108,17 @@ export function useScriptRunner({
 
         if (step.newName) {
           setTasks((prev) => {
-            const finalName = makeUniqueName(
-              step.newName,
-              prev.map((t) => t.name)
-            )
-
+            const finalName = makeUniqueName(step.newName, prev.map((t) => t.name))
             const newId = nextTaskIdRef.current
             const newTask = {
               id: newId,
               name: finalName,
               messages: [],
               status: 'idle',
+              lifecycle: 'open',
+              createdBy: 'script',
+              parentTaskId: null,
+              createdAt: new Date().toISOString(),
               requestStartedAt: null,
               lastDurationMs: null,
             }
@@ -136,13 +128,11 @@ export function useScriptRunner({
           })
 
           setNextTaskId((prev) => prev + 1)
+          nextTaskIdRef.current += 1
           setScriptStatus(`Step ${step.lineNum}: created task`)
         } else if (step.name) {
           setTasks((prev) => {
-            const found = prev.find(
-              (t) => t.name.toLowerCase() === step.name.toLowerCase()
-            )
-
+            const found = prev.find((t) => t.name.toLowerCase() === step.name.toLowerCase())
             if (found) refMap.current[ref] = found.id
             return prev
           })
@@ -162,11 +152,7 @@ export function useScriptRunner({
         }
 
         setScriptStatus(`Step ${step.lineNum}: posting to "${step.ref}"â€¦`)
-
-        const priorSummary = summaryByRef[step.ref] ?? ''
-        const newSummary = await sendMessage(taskId, step.text, priorSummary)
-        summaryByRef[step.ref] = newSummary ?? priorSummary
-
+        await sendMessage(taskId, step.text)
         setScriptStatus(`Step ${step.lineNum}: response received`)
       }
     }
