@@ -38,6 +38,17 @@ function formatSessionTimestamp(date = new Date()) {
   ].join('')
 }
 
+function safeFilePart(value) {
+  const cleaned = String(value || 'task')
+    .trim()
+    .replace(/[<>:"/\\|?*]+/g, '-')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+
+  return cleaned || 'task'
+}
+
 function hasThinkingTasks(tasks) {
   return tasks.some((task) => task.status === 'thinking')
 }
@@ -102,6 +113,85 @@ function validateSessionFile(session) {
   if (hasThinkingTasks(session.state.tasks)) {
     throw new Error('This session contains an in-progress request. Stop or finish active requests before saving a session.')
   }
+}
+
+function escapeScriptValue(value) {
+  return String(value ?? '')
+    .replace(/\\/g, '\\\\')
+    .replace(/\r/g, '\\r')
+    .replace(/\n/g, '\\n')
+    .replace(/\t/g, '\\t')
+    .replace(/"/g, '\\"')
+}
+
+function buildTaskReplayScript(task) {
+  const userMessages = task.messages.filter(
+    (message) => message.role === 'user' && typeof message.content === 'string'
+  )
+
+  if (userMessages.length === 0) {
+    throw new Error('The selected task does not have any user instructions to export.')
+  }
+
+  const ref = 'task1'
+  const lines = [
+    '# Dumb Barton replay script',
+    `# Exported: ${new Date().toISOString()}`,
+    `# Source task: ${task.name}`,
+    '#',
+    '# This script replays the user instructions through the existing Script Runner.',
+    '# It does not preserve old agent responses verbatim; loading it will generate new responses.',
+    '',
+    `1,TASK,NEW_NAME="${escapeScriptValue(task.name)}",REF="${ref}"`,
+  ]
+
+  userMessages.forEach((message, index) => {
+    lines.push(
+      `${index + 2},POST_AND_WAIT,REF="${ref}",TEXT="${escapeScriptValue(message.content)}"`
+    )
+  })
+
+  return lines.join('\n') + '\n'
+}
+
+async function saveTextFileWithDialog({ text, suggestedName, mimeType, description, extensions }) {
+  if (typeof window.showSaveFilePicker === 'function') {
+    try {
+      const fileHandle = await window.showSaveFilePicker({
+        suggestedName,
+        types: [
+          {
+            description,
+            accept: {
+              [mimeType]: extensions,
+            },
+          },
+        ],
+      })
+
+      const writable = await fileHandle.createWritable()
+      await writable.write(text)
+      await writable.close()
+      return true
+    } catch (err) {
+      if (err?.name === 'AbortError') {
+        return false
+      }
+
+      console.warn('Save picker failed. Falling back to browser download.', err)
+    }
+  }
+
+  const blob = new Blob([text], { type: mimeType })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = suggestedName
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  URL.revokeObjectURL(url)
+  return true
 }
 
 function Task({ task, onClose, onEditName, onSendMessage, onStop, onRestart }) {
@@ -326,69 +416,68 @@ function App() {
   }, [])
 
   const saveSession = useCallback(async () => {
-  const currentTasks = tasksRef.current
+    const currentTasks = tasksRef.current
 
-  if (hasThinkingTasks(currentTasks)) {
-    window.alert('Stop or finish active agent requests before saving the session.')
-    return
-  }
-
-  const session = {
-    app: SESSION_FILE_APP,
-    version: SESSION_FILE_VERSION,
-    savedAt: new Date().toISOString(),
-    state: {
-      tasks: currentTasks.map(normalizeTaskForSave),
-      nextTaskId,
-      selectedTaskId,
-      scriptStatus,
-    },
-  }
-
-  const suggestedName = `dumb-barton-session-${formatSessionTimestamp()}.json`
-  const sessionJson = JSON.stringify(session, null, 2)
-
-  if (typeof window.showSaveFilePicker === 'function') {
-    try {
-      const fileHandle = await window.showSaveFilePicker({
-        suggestedName,
-        types: [
-          {
-            description: 'Dumb Barton Session JSON',
-            accept: {
-              'application/json': ['.json'],
-            },
-          },
-        ],
-      })
-
-      const writable = await fileHandle.createWritable()
-      await writable.write(sessionJson)
-      await writable.close()
+    if (hasThinkingTasks(currentTasks)) {
+      window.alert('Stop or finish active agent requests before saving the session.')
       return
-    } catch (err) {
-      if (err?.name === 'AbortError') {
-        return
-      }
-
-      console.warn('Save picker failed. Falling back to browser download.', err)
     }
-  }
 
-  const blob = new Blob([sessionJson], {
-    type: 'application/json',
-  })
+    const session = {
+      app: SESSION_FILE_APP,
+      version: SESSION_FILE_VERSION,
+      savedAt: new Date().toISOString(),
+      state: {
+        tasks: currentTasks.map(normalizeTaskForSave),
+        nextTaskId,
+        selectedTaskId,
+        scriptStatus,
+      },
+    }
 
-  const url = URL.createObjectURL(blob)
-  const anchor = document.createElement('a')
-  anchor.href = url
-  anchor.download = suggestedName
-  document.body.appendChild(anchor)
-  anchor.click()
-  anchor.remove()
-  URL.revokeObjectURL(url)
-}, [nextTaskId, scriptStatus, selectedTaskId])
-const openLoadSessionPicker = useCallback(() => {
+    const suggestedName = `dumb-barton-session-${formatSessionTimestamp()}.json`
+    const sessionJson = JSON.stringify(session, null, 2)
+
+    await saveTextFileWithDialog({
+      text: sessionJson,
+      suggestedName,
+      mimeType: 'application/json',
+      description: 'Dumb Barton Session JSON',
+      extensions: ['.json'],
+    })
+  }, [nextTaskId, scriptStatus, selectedTaskId])
+
+  const saveSelectedTaskAsScript = useCallback(async () => {
+    const currentTasks = tasksRef.current
+
+    if (hasThinkingTasks(currentTasks)) {
+      window.alert('Stop or finish active agent requests before saving a task script.')
+      return
+    }
+
+    const selectedTask = currentTasks.find((task) => task.id === selectedTaskId)
+    if (!selectedTask) {
+      window.alert('Select a task before saving a task script.')
+      return
+    }
+
+    try {
+      const scriptText = buildTaskReplayScript(selectedTask)
+      const suggestedName = `dumb-barton-task-${safeFilePart(selectedTask.name)}-${formatSessionTimestamp()}.csv`
+
+      await saveTextFileWithDialog({
+        text: scriptText,
+        suggestedName,
+        mimeType: 'text/csv',
+        description: 'Dumb Barton Script CSV',
+        extensions: ['.csv', '.txt'],
+      })
+    } catch (err) {
+      window.alert(`Could not save task script: ${err.message}`)
+    }
+  }, [selectedTaskId])
+
+  const openLoadSessionPicker = useCallback(() => {
     if (hasThinkingTasks(tasksRef.current)) {
       window.alert('Stop or finish active agent requests before loading another session.')
       return
@@ -583,6 +672,7 @@ const openLoadSessionPicker = useCallback(() => {
 
   const selectedTask = tasks.find((t) => t.id === selectedTaskId)
   const sessionActionDisabled = hasThinkingTasks(tasks)
+  const saveTaskScriptDisabled = sessionActionDisabled || !selectedTask
 
   const { runScript } = useScriptRunner({
     tasks,
@@ -611,6 +701,10 @@ const openLoadSessionPicker = useCallback(() => {
 
           <button className="btn btn-secondary" onClick={openLoadSessionPicker} disabled={sessionActionDisabled}>
             Load Session
+          </button>
+
+          <button className="btn btn-secondary" onClick={saveSelectedTaskAsScript} disabled={saveTaskScriptDisabled}>
+            Save Task Script
           </button>
 
           <input
@@ -724,5 +818,4 @@ const openLoadSessionPicker = useCallback(() => {
 }
 
 export default App
-
 

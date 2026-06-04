@@ -693,3 +693,43 @@ body {
   color: #8ea3c8;
 }
 
+
+/* Frontend-only session save/load and task-script export controls. */
+.session-file-input {
+  display: none;
+}
+
+.btn-secondary {
+  background: rgba(148, 163, 184, 0.14);
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  color: #dbeafe;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: rgba(148, 163, 184, 0.22);
+}
+
+.btn-secondary:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* Frontend-only request timing display. These values are never sent to the LLM. */
+.message-duration {
+  margin-top: 6px;
+  font-size: 0.72rem;
+  color: #8ea3c8;
+  text-align: right;
+}
+
+.message-assistant .message-duration {
+  text-align: left;
+}
+
+.thinking-duration {
+  display: inline-block;
+  margin-left: 10px;
+  font-size: 0.78rem;
+  color: #8ea3c8;
+}
+

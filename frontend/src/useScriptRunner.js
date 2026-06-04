@@ -1,135 +1,179 @@
-import { useCallback, useRef } from 'react'
+﻿import { useCallback, useRef } from 'react'
 
 const VALID_ACTIONS = ['TASK', 'POST_AND_WAIT']
 
+function unescapeParam(value) {
+  return String(value ?? '')
+    .replace(/\\r/g, '\r')
+    .replace(/\\n/g, '\n')
+    .replace(/\\t/g, '\t')
+    .replace(/\\"/g, '"')
+    .replace(/\\\\/g, '\\')
+}
+
 function parseParam(raw, key) {
-    const re = new RegExp(key + '\\s*=\\s*"([^"]*)"', 'i')
-    const m = raw.match(re)
-    return m ? m[1] : null
+  const re = new RegExp(`${key}\\s*=\\s*"((?:\\\\.|[^"\\\\])*)"`, 'i')
+  const m = raw.match(re)
+  return m ? unescapeParam(m[1]) : null
 }
 
 function parseScriptLine(line) {
-    const line2 = line.trim()
-    if (!line2 || line2.startsWith('#')) return null
-    const parts = line2.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/)
-    if (parts.length < 2) return null
-    const lineNum = parseInt(parts[0].trim(), 10)
-    const action = parts[1].trim().toUpperCase()
-    const rest = parts.slice(2).join(',')
-    if (!VALID_ACTIONS.includes(action)) {
-        return { error: `Unknown action "${action}" on line ${lineNum}` }
-    }
-    if (action === 'TASK') {
-        const newName = parseParam(rest, 'NEW_NAME')
-        const name = parseParam(rest, 'NAME')
-        const ref = parseParam(rest, 'REF')
-        if (!ref) return { error: `Line ${lineNum}: TASK requires REF=".."` }
-        if (!newName && !name) return { error: `Line ${lineNum}: TASK requires NEW_NAME or NAME` }
-        return { lineNum, action, newName, name, ref }
-    }
-    if (action === 'POST_AND_WAIT') {
-        const text = parseParam(rest, 'TEXT')
-        const ref = parseParam(rest, 'REF')
-        if (!text) return { error: `Line ${lineNum}: POST_AND_WAIT requires TEXT=".."` }
-        if (!ref) return { error: `Line ${lineNum}: POST_AND_WAIT requires REF=".."` }
-        return { lineNum, action, text, ref }
-    }
-    return null
+  const line2 = line.trim()
+  if (!line2 || line2.startsWith('#')) return null
+
+  const parts = line2.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/)
+  if (parts.length < 2) return null
+
+  const lineNum = parseInt(parts[0].trim(), 10)
+  const action = parts[1].trim().toUpperCase()
+  const rest = parts.slice(2).join(',')
+
+  if (!VALID_ACTIONS.includes(action)) {
+    return { error: `Unknown action "${action}" on line ${lineNum}` }
+  }
+
+  if (action === 'TASK') {
+    const newName = parseParam(rest, 'NEW_NAME')
+    const name = parseParam(rest, 'NAME')
+    const ref = parseParam(rest, 'REF')
+
+    if (!ref) return { error: `Line ${lineNum}: TASK requires REF=".."` }
+    if (!newName && !name) return { error: `Line ${lineNum}: TASK requires NEW_NAME or NAME` }
+
+    return { lineNum, action, newName, name, ref }
+  }
+
+  if (action === 'POST_AND_WAIT') {
+    const text = parseParam(rest, 'TEXT')
+    const ref = parseParam(rest, 'REF')
+
+    if (!text) return { error: `Line ${lineNum}: POST_AND_WAIT requires TEXT=".."` }
+    if (!ref) return { error: `Line ${lineNum}: POST_AND_WAIT requires REF=".."` }
+
+    return { lineNum, action, text, ref }
+  }
+
+  return null
 }
 
 export function parseScript(csvText) {
-    const lines = csvText.split('\n')
-    const steps = []
-    const errors = []
-    for (const line of lines) {
-        const parsed = parseScriptLine(line)
-        if (parsed === null) continue
-        if (parsed.error) { errors.push(parsed.error); continue }
-        steps.push(parsed)
+  const lines = csvText.split('\n')
+  const steps = []
+  const errors = []
+
+  for (const line of lines) {
+    const parsed = parseScriptLine(line)
+    if (parsed === null) continue
+
+    if (parsed.error) {
+      errors.push(parsed.error)
+      continue
     }
-    return { steps, errors }
+
+    steps.push(parsed)
+  }
+
+  return { steps, errors }
 }
 
 // Returns the smallest unique name given a desired base name and existing names.
 // Comparison is case-insensitive.
 export function makeUniqueName(desired, existingNames) {
-    const lower = (s) => s.toLowerCase()
-    const taken = new Set(existingNames.map(lower))
-    if (!taken.has(lower(desired))) return desired
-    let i = 2
-    while (taken.has(lower(`${desired} (${i})`))) i++
-    return `${desired} (${i})`
+  const lower = (s) => s.toLowerCase()
+  const taken = new Set(existingNames.map(lower))
+
+  if (!taken.has(lower(desired))) return desired
+
+  let i = 2
+  while (taken.has(lower(`${desired} (${i})`))) i++
+
+  return `${desired} (${i})`
 }
 
-export function useScriptRunner({ tasks, setTasks, nextTaskId, setNextTaskId,
-    sendMessage, setScriptStatus }) {
-    const refMap = useRef({})
-    // Mirror nextTaskId into a ref so the async loop always reads the latest value
-    const nextTaskIdRef = useRef(nextTaskId)
-    nextTaskIdRef.current = nextTaskId
+export function useScriptRunner({
+  setTasks,
+  nextTaskId,
+  setNextTaskId,
+  sendMessage,
+  setScriptStatus,
+}) {
+  const refMap = useRef({})
 
-    const runScript = useCallback(async (steps) => {
-        refMap.current = {}
-        // Track the running summary per ref so each step feeds context to the next
-        const summaryByRef = {}
+  // Mirror nextTaskId into a ref so the async loop always reads the latest value.
+  const nextTaskIdRef = useRef(nextTaskId)
+  nextTaskIdRef.current = nextTaskId
 
-        for (const step of steps) {
-            if (step.action === 'TASK') {
-                const ref = step.ref
+  const runScript = useCallback(async (steps) => {
+    refMap.current = {}
 
-                if (step.newName) {
-                    let assignedId
-                    setTasks(prev => {
-                        const finalName = makeUniqueName(
-                            step.newName,
-                            prev.map(t => t.name)
-                        )
-                        const newId = nextTaskIdRef.current
-                        assignedId = newId
-                        const newTask = {
-                            id: newId,
-                            name: finalName,
-                            messages: [],
-                            conversationSummary: '',
-                            status: 'idle'
-                        }
-                        refMap.current[ref] = newId
-                        return [...prev, newTask]
-                    })
-                    setNextTaskId(prev => prev + 1)
-                    setScriptStatus(`Step ${step.lineNum}: created task`)
-                } else if (step.name) {
-                    setTasks(prev => {
-                        const found = prev.find(
-                            t => t.name.toLowerCase() === step.name.toLowerCase()
-                        )
-                        if (found) refMap.current[ref] = found.id
-                        return prev
-                    })
-                    setScriptStatus(`Step ${step.lineNum}: using task "${step.name}"`)
-                }
+    // Track the running summary per ref so each step feeds context to the next
+    // when the backend supports summary return values. Harmless when unused.
+    const summaryByRef = {}
 
-                await new Promise(r => setTimeout(r, 80))
+    for (const step of steps) {
+      if (step.action === 'TASK') {
+        const ref = step.ref
+
+        if (step.newName) {
+          setTasks((prev) => {
+            const finalName = makeUniqueName(
+              step.newName,
+              prev.map((t) => t.name)
+            )
+
+            const newId = nextTaskIdRef.current
+            const newTask = {
+              id: newId,
+              name: finalName,
+              messages: [],
+              status: 'idle',
+              requestStartedAt: null,
+              lastDurationMs: null,
             }
 
-            if (step.action === 'POST_AND_WAIT') {
-                const taskId = refMap.current[step.ref]
-                if (taskId == null) {
-                    setScriptStatus(`Step ${step.lineNum}: ERROR — ref "${step.ref}" has no task`)
-                    continue
-                }
-                setScriptStatus(`Step ${step.lineNum}: posting to "${step.ref}"…`)
-                // Pass the summary accumulated so far for this ref, and store the
-                // updated summary returned by the backend for the next step.
-                const priorSummary = summaryByRef[step.ref] ?? ''
-                const newSummary = await sendMessage(taskId, step.text, priorSummary)
-                summaryByRef[step.ref] = newSummary ?? priorSummary
-                setScriptStatus(`Step ${step.lineNum}: response received`)
-            }
+            refMap.current[ref] = newId
+            return [...prev, newTask]
+          })
+
+          setNextTaskId((prev) => prev + 1)
+          setScriptStatus(`Step ${step.lineNum}: created task`)
+        } else if (step.name) {
+          setTasks((prev) => {
+            const found = prev.find(
+              (t) => t.name.toLowerCase() === step.name.toLowerCase()
+            )
+
+            if (found) refMap.current[ref] = found.id
+            return prev
+          })
+
+          setScriptStatus(`Step ${step.lineNum}: using task "${step.name}"`)
         }
 
-        setScriptStatus('Script complete')
-    }, [setTasks, setNextTaskId, sendMessage, setScriptStatus])
+        await new Promise((resolve) => setTimeout(resolve, 80))
+      }
 
-    return { runScript }
+      if (step.action === 'POST_AND_WAIT') {
+        const taskId = refMap.current[step.ref]
+
+        if (taskId == null) {
+          setScriptStatus(`Step ${step.lineNum}: ERROR â€” ref "${step.ref}" has no task`)
+          continue
+        }
+
+        setScriptStatus(`Step ${step.lineNum}: posting to "${step.ref}"â€¦`)
+
+        const priorSummary = summaryByRef[step.ref] ?? ''
+        const newSummary = await sendMessage(taskId, step.text, priorSummary)
+        summaryByRef[step.ref] = newSummary ?? priorSummary
+
+        setScriptStatus(`Step ${step.lineNum}: response received`)
+      }
+    }
+
+    setScriptStatus('Script complete')
+  }, [setTasks, setNextTaskId, sendMessage, setScriptStatus])
+
+  return { runScript }
 }
+
