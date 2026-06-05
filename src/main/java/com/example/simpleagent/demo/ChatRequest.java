@@ -1,4 +1,4 @@
-package com.example.simpleagent.demo;
+﻿package com.example.simpleagent.demo;
 
 import java.util.List;
 
@@ -6,6 +6,7 @@ public class ChatRequest {
     private Integer taskId;
     private List<String> context;
     private String latest;
+    private List<TaskSnapshot> tasks;
 
     public Integer getTaskId() {
         return taskId;
@@ -30,4 +31,13 @@ public class ChatRequest {
     public void setLatest(String latest) {
         this.latest = latest;
     }
+
+    public List<TaskSnapshot> getTasks() {
+        return tasks;
+    }
+
+    public void setTasks(List<TaskSnapshot> tasks) {
+        this.tasks = tasks;
+    }
 }
+

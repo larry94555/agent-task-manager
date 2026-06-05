@@ -733,3 +733,88 @@ body {
   color: #8ea3c8;
 }
 
+
+
+/* Task hierarchy, lifecycle, and frontend-applied native tool action styling. */
+.task-title-area {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.task-meta-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 0.72rem;
+  color: #8ea3c8;
+}
+
+.task-closed-badge {
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 999px;
+  padding: 1px 8px;
+  color: #cbd5e1;
+}
+
+.task-section-label {
+  margin: 14px 0 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #93a4bf;
+}
+
+.closed-label {
+  margin-top: 20px;
+}
+
+.task-list-item.closed {
+  opacity: 0.62;
+}
+
+.task-child-marker {
+  margin-right: 6px;
+  color: #93a4bf;
+}
+
+.message-tool {
+  border: 1px solid rgba(59, 130, 246, 0.28);
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.message-tool .message-label {
+  color: #93c5fd;
+}
+
+.btn-inline {
+  margin-top: 8px;
+  padding: 4px 10px;
+  font-size: 0.78rem;
+  background: rgba(59, 130, 246, 0.14);
+  border: 1px solid rgba(59, 130, 246, 0.32);
+  color: #dbeafe;
+}
+
+.closed-task-notice {
+  border-top: 1px solid rgba(148, 163, 184, 0.18);
+  padding: 10px 16px;
+  font-size: 0.82rem;
+  color: #cbd5e1;
+  background: rgba(148, 163, 184, 0.08);
+}
+
+/* Frontend mojibake fix: use meaningful text labels instead of fragile Unicode glyphs. */
+.task-child-marker {
+  margin-right: 6px;
+  font-size: 0.72rem;
+  color: #93a4bf;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.status-thinking,
+.status-running {
+  font-weight: 700;
+}
