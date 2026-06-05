@@ -805,3 +805,16 @@ body {
   background: rgba(148, 163, 184, 0.08);
 }
 
+/* Frontend mojibake fix: use meaningful text labels instead of fragile Unicode glyphs. */
+.task-child-marker {
+  margin-right: 6px;
+  font-size: 0.72rem;
+  color: #93a4bf;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.status-thinking,
+.status-running {
+  font-weight: 700;
+}

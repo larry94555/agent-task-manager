@@ -774,11 +774,11 @@ function App() {
       style={{ paddingLeft: `${12 + depth * 18}px` }}
     >
       <span className="task-list-name">
-        {depth > 0 && <span className="task-child-marker">â†³</span>}
+        {depth > 0 && <span className="task-child-marker">Subtask:</span>}
         {task.name}
       </span>
       <span className={`task-status status-${task.status}`}>
-        {task.status === 'thinking' ? 'â—' : task.status === 'stopped' ? 'â¸' : task.lifecycle === 'closed' ? 'Closed' : ''}
+        {task.status === 'thinking' ? 'Running' : task.status === 'stopped' ? 'Stopped' : task.lifecycle === 'closed' ? 'Closed' : ''}
       </span>
     </li>
   )
@@ -849,7 +849,7 @@ function App() {
                   <button key={task.id} className="task-picker-card" onClick={() => setSelectedTaskId(task.id)}>
                     <span className="task-picker-name">{task.name}</span>
                     <span className={`task-status status-${task.status}`}>
-                      {task.status === 'thinking' ? 'â— Thinking' : task.lifecycle === 'closed' ? 'Closed' : task.status === 'stopped' ? 'â¸ Stopped' : 'Open'}
+                      {task.status === 'thinking' ? 'Running' : task.lifecycle === 'closed' ? 'Closed' : task.status === 'stopped' ? 'Stopped' : 'Open'}
                     </span>
                   </button>
                 ))}
@@ -860,7 +860,7 @@ function App() {
               <img className="no-task-hero" src={agentTaskImage} alt="AI agent hub connected to goals, questions, and task cards" />
               <div className="empty-state-badge">Local agent workspace</div>
               <h2>Give Dumb Barton a goal.</h2>
-              <p>Create an agent task, then ask a question, define an objective, or give a concrete instruction. This is not just a chat window â€” it is a workspace for directing a local agent running on your machine.</p>
+              <p>Create an agent task, then ask a question, define an objective, or give a concrete instruction. This is not just a chat window. It is a workspace for directing a local agent running on your machine.</p>
               <button className="btn btn-primary empty-state-button" onClick={createTask}>Create Agent Task</button>
             </div>
           )}
