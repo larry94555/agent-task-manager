@@ -20,7 +20,11 @@ public class ChatResponse {
         this.taskActions = taskActions == null ? new ArrayList<>() : taskActions;
     }
 
-    public ChatResponse(String content, List<ClientTaskAction> taskActions, List<ModelCallTrace> modelCallTraces) {
+    public ChatResponse(
+            String content,
+            List<ClientTaskAction> taskActions,
+            List<ModelCallTrace> modelCallTraces
+    ) {
         this.content = content;
         this.taskActions = taskActions == null ? new ArrayList<>() : taskActions;
         this.modelCallTraces = modelCallTraces == null ? new ArrayList<>() : modelCallTraces;

@@ -2,9 +2,11 @@ import { useState } from 'react'
 
 function formatDuration(ms) {
   if (ms == null || Number.isNaN(Number(ms))) return ''
+
   const numeric = Number(ms)
   if (numeric < 1000) return `${Math.max(0, Math.round(numeric))} ms`
   if (numeric < 60_000) return `${(numeric / 1000).toFixed(1)} s`
+
   const minutes = Math.floor(numeric / 60_000)
   const seconds = Math.round((numeric % 60_000) / 1000)
   return `${minutes}m ${seconds}s`
@@ -15,6 +17,26 @@ function previewText(value, maxChars = 80) {
   const normalized = text.replace(/\s+/g, ' ').trim()
   if (!normalized) return '(empty)'
   return normalized.length > maxChars ? `${normalized.slice(0, maxChars)}...` : normalized
+}
+
+function findOriginalPrompt(task, message, messageIndex) {
+  if (typeof message?.originalPrompt === 'string' && message.originalPrompt.trim()) {
+    return message.originalPrompt
+  }
+
+  const messages = Array.isArray(task?.messages) ? task.messages : []
+  const startIndex = Number.isFinite(Number(messageIndex))
+    ? Math.min(Number(messageIndex) - 1, messages.length - 1)
+    : messages.length - 1
+
+  for (let i = startIndex; i >= 0; i -= 1) {
+    const candidate = messages[i]
+    if (candidate?.role === 'user' && typeof candidate.content === 'string') {
+      return candidate.content
+    }
+  }
+
+  return ''
 }
 
 function TraceTextBox({ title, subtitle, value }) {
@@ -40,8 +62,8 @@ function TraceTextBox({ title, subtitle, value }) {
       <textarea
         className={`trace-textbox ${expanded ? 'expanded' : 'collapsed'}`}
         readOnly
+        rows={expanded ? 12 : 3}
         value={displayValue}
-        rows={expanded ? 10 : 2}
         onClick={() => setExpanded(true)}
       />
     </section>
@@ -50,18 +72,19 @@ function TraceTextBox({ title, subtitle, value }) {
 
 export function PromptTraceDetail({ task, message, messageIndex, onBack }) {
   const traces = Array.isArray(message?.modelCallTraces) ? message.modelCallTraces : []
+  const originalPrompt = findOriginalPrompt(task, message, messageIndex)
 
   return (
     <div className="trace-detail-view">
       <div className="trace-detail-header">
         <div>
           <button type="button" className="trace-back-link" onClick={onBack}>
-            â† Back to Task
+            &lt; Back to Task
           </button>
           <h2>Prompt/Response Deep Dive</h2>
           <p>
             Task: <strong>{task?.name ?? 'Unknown task'}</strong>
-            {Number.isFinite(Number(messageIndex)) ? ` Â· Agent message #${Number(messageIndex) + 1}` : ''}
+            {Number.isFinite(Number(messageIndex)) ? ` | Agent message #${Number(messageIndex) + 1}` : ''}
           </p>
         </div>
         <div className="trace-summary-card">
@@ -69,6 +92,12 @@ export function PromptTraceDetail({ task, message, messageIndex, onBack }) {
           model call{traces.length === 1 ? '' : 's'}
         </div>
       </div>
+
+      <TraceTextBox
+        title="Original user prompt"
+        subtitle="The normal task-view instruction that started this agent response. This is shown for context before the internal llama.cpp prompts."
+        value={originalPrompt}
+      />
 
       <TraceTextBox
         title="Final answer shown in the task"
@@ -87,34 +116,28 @@ export function PromptTraceDetail({ task, message, messageIndex, onBack }) {
               <div>
                 <h3>Model call {trace.callNumber || index + 1}</h3>
                 <p>
-                  {trace.messageCount ?? 0} message(s) Â· max_tokens {trace.maxTokens ?? '?'} Â· temperature {trace.temperature ?? '?'}
+                  {trace.messageCount ?? 0} message(s) | max_tokens {trace.maxTokens ?? '?'} | temperature {trace.temperature ?? '?'}
                 </p>
               </div>
               <div className={`trace-status ${trace.success ? 'success' : 'failure'}`}>
                 {trace.success ? 'success' : 'failed'}
-                {trace.durationMs != null && ` Â· ${formatDuration(trace.durationMs)}`}
-                {trace.httpStatus ? ` Â· HTTP ${trace.httpStatus}` : ''}
+                {trace.durationMs != null && ` | ${formatDuration(trace.durationMs)}`}
+                {trace.httpStatus ? ` | HTTP ${trace.httpStatus}` : ''}
               </div>
             </div>
 
-            {trace.error && (
-              <div className="trace-error-box">
-                {trace.error}
-              </div>
-            )}
+            {trace.error && <div className="trace-error-box">{trace.error}</div>}
 
             <TraceTextBox
               title="Prompt sent to llama.cpp"
               subtitle="Exact JSON request body sent to /v1/chat/completions."
               value={trace.prompt}
             />
-
             <TraceTextBox
               title="Raw response returned by llama.cpp"
               subtitle="Exact HTTP response body captured before content extraction."
               value={trace.response}
             />
-
             <TraceTextBox
               title="Extracted assistant content"
               subtitle="The choices[0].message.content value used by the agent loop."
