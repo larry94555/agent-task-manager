@@ -9,7 +9,7 @@ import java.net.URI;
 import java.util.Locale;
 
 public class WebToolPolicy {
-    public static final int DEFAULT_MAX_CHARS = 12_000;
+    public static final int DEFAULT_MAX_CHARS = 4_000;
     public static final int MAX_EXTRACTED_CHARS = 20_000;
     public static final int MAX_RESPONSE_BYTES = 2_000_000;
     public static final int MAX_REDIRECTS = 3;
