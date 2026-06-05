@@ -276,9 +276,20 @@ public class WebReadOnlyToolService {
     private List<WebSearchResult> duckDuckGoInstantAnswer(String query, int maxResults) throws IOException, InterruptedException {
         String encoded = URLEncoder.encode(query, StandardCharsets.UTF_8);
         URI uri = policy.requirePublicHttpUrl("https://api.duckduckgo.com/?q=" + encoded + "&format=json&no_redirect=1&no_html=1");
-        RawResponse raw = fetchRaw(uri, 0);
-        JsonNode root = objectMapper.readTree(decodeBody(raw));
 
+        HttpRequest request = HttpRequest.newBuilder(uri)
+                .timeout(Duration.ofSeconds(10))
+                .header("User-Agent", USER_AGENT)
+                .header("Accept", "application/json,text/javascript,*/*;q=0.1")
+                .GET()
+                .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new IOException("DuckDuckGo Instant Answer returned HTTP " + response.statusCode() + ": " + limit(response.body(), 500));
+        }
+
+        JsonNode root = objectMapper.readTree(response.body());
         List<WebSearchResult> results = new ArrayList<>();
 
         String abstractUrl = root.path("AbstractURL").asText("");
@@ -432,7 +443,7 @@ public class WebReadOnlyToolService {
         HttpRequest request = HttpRequest.newBuilder(safeUri)
                 .timeout(Duration.ofSeconds(10))
                 .header("User-Agent", USER_AGENT)
-                .header("Accept", "text/html,application/xhtml+xml,text/plain,application/json,application/xml;q=0.9,*/*;q=0.1")
+                .header("Accept", "text/html,application/xhtml+xml,text/plain,application/json,application/xml,text/javascript,application/javascript,application/x-javascript;q=0.9,*/*;q=0.1")
                 .GET()
                 .build();
 
@@ -476,6 +487,7 @@ public class WebReadOnlyToolService {
                 || lower.contains("html")
                 || lower.contains("json")
                 || lower.contains("xml")
+                || lower.contains("javascript")
                 || lower.equals("unknown")
                 || lower.isBlank();
     }
