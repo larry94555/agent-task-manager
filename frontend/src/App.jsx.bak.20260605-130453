@@ -1,6 +1,5 @@
-import { useState, useRef, useCallback, useEffect } from 'react'
+﻿import { useState, useRef, useCallback, useEffect } from 'react'
 import './App.css'
-import { PromptTraceDetail } from './PromptTraceDetail'
 import agentTaskImage from './assets/agent-task-orchestration.png'
 import { useScriptRunner, makeUniqueName } from './useScriptRunner'
 import { ScriptRunner } from './ScriptRunner'
@@ -61,7 +60,7 @@ function normalizeMessage(message) {
     ...(Number.isFinite(Number(message?.taskId)) ? { taskId: Number(message.taskId) } : {}),
     ...(Number.isFinite(Number(message?.parentTaskId)) ? { parentTaskId: Number(message.parentTaskId) } : {}),
     ...(typeof message?.taskName === 'string' ? { taskName: message.taskName } : {}),
-    ...(Number.isFinite(Number(message?.durationMs)) ? { durationMs: Number(message.durationMs) } : {}), ...(Array.isArray(message?.modelCallTraces) ? { modelCallTraces: message.modelCallTraces } : {}),
+    ...(Number.isFinite(Number(message?.durationMs)) ? { durationMs: Number(message.durationMs) } : {}),
   }
 }
 
@@ -334,14 +333,15 @@ function Task({ task, onBack, onEditName, onSendMessage, onStop, onRestart, onRe
   const [editingName, setEditingName] = useState(false)
   const [nameDraft, setNameDraft] = useState(task.name)
   const [nowMs, setNowMs] = useState(Date.now())
-  const [deepDiveMessage, setDeepDiveMessage] = useState(null)
   const messagesRef = useRef(null)
   const messagesEndRef = useRef(null)
   const shouldAutoScrollRef = useRef(true)
+
   const isClosed = task.lifecycle === 'closed'
 
   useEffect(() => {
     if (task.status !== 'thinking') return undefined
+
     setNowMs(Date.now())
     const intervalId = window.setInterval(() => setNowMs(Date.now()), 250)
     return () => window.clearInterval(intervalId)
@@ -376,51 +376,42 @@ function Task({ task, onBack, onEditName, onSendMessage, onStop, onRestart, onRe
     setEditingName(false)
   }
 
-  const activeElapsedMs = task.status === 'thinking' && task.requestStartedAt
-    ? nowMs - task.requestStartedAt
-    : null
-
-  if (deepDiveMessage) {
-    return (
-      <PromptTraceDetail
-        task={task}
-        message={deepDiveMessage.message}
-        messageIndex={deepDiveMessage.messageIndex}
-        onBack={() => setDeepDiveMessage(null)}
-      />
-    )
-  }
+  const activeElapsedMs = task.status === 'thinking' && task.requestStartedAt ? nowMs - task.requestStartedAt : null
 
   return (
     <div className="task-panel">
       <div className="task-header">
-        {editingName ? (
-          <input
-            className="task-name-input"
-            value={nameDraft}
-            onChange={(e) => setNameDraft(e.target.value)}
-            onBlur={handleNameSubmit}
-            onKeyDown={(e) => e.key === 'Enter' && handleNameSubmit()}
-            autoFocus
-          />
-        ) : (
-          <h3
-            className="task-name"
-            onClick={() => {
-              setNameDraft(task.name)
-              setEditingName(true)
-            }}
-            title="Click to edit name"
-          >
-            {task.name}
-          </h3>
-        )}
+        <div className="task-title-area">
+          {editingName ? (
+            <input
+              className="task-name-input"
+              value={nameDraft}
+              onChange={(e) => setNameDraft(e.target.value)}
+              onBlur={handleNameSubmit}
+              onKeyDown={(e) => e.key === 'Enter' && handleNameSubmit()}
+              autoFocus
+            />
+          ) : (
+            <h3
+              className="task-name"
+              onClick={() => {
+                setNameDraft(task.name)
+                setEditingName(true)
+              }}
+              title="Click to edit name"
+            >
+              {task.name}
+            </h3>
+          )}
+
+          <div className="task-meta-line">
+            {task.parentTaskId != null && <span>Child of task {task.parentTaskId}</span>}
+            {task.createdBy && <span>Created by {task.createdBy}</span>}
+            {isClosed && <span className="task-closed-badge">Closed</span>}
+          </div>
+        </div>
 
         <div className="task-actions">
-          {task.parentTaskId != null && <span className="task-meta-pill">Child of task {task.parentTaskId}</span>}
-          {task.createdBy && <span className="task-meta-pill">Created by {task.createdBy}</span>}
-          {isClosed && <span className="task-meta-pill closed">Closed</span>}
-
           {task.status === 'thinking' && (
             <button className="btn btn-stop" onClick={() => onStop(task.id)} title="Stop thinking">
               Stop
@@ -457,7 +448,7 @@ function Task({ task, onBack, onEditName, onSendMessage, onStop, onRestart, onRe
                 <div className="message-label">Task Action</div>
                 <div className="message-content">{msg.content}</div>
                 {shouldShowOpenTaskLink(msg, task.id) && (
-                  <button className="btn btn-secondary task-open-link" onClick={() => onOpenTask(msg.taskId)}>
+                  <button className="btn btn-inline" onClick={() => onOpenTask(msg.taskId)}>
                     Open Task
                   </button>
                 )}
@@ -465,29 +456,12 @@ function Task({ task, onBack, onEditName, onSendMessage, onStop, onRestart, onRe
             )
           }
 
-          const hasTrace = msg.role === 'assistant'
-            && Array.isArray(msg.modelCallTraces)
-            && msg.modelCallTraces.length > 0
-
           return (
             <div key={idx} className={`message message-${msg.role}`}>
               <div className="message-label">{msg.role === 'user' ? 'Instruction' : 'Agent'}</div>
               <div className="message-content">{msg.content}</div>
-
               {msg.durationMs != null && (
-                <div className="message-duration">
-                  Response time: {formatDuration(msg.durationMs)}
-                </div>
-              )}
-
-              {hasTrace && (
-                <button
-                  type="button"
-                  className="message-detail-link"
-                  onClick={() => setDeepDiveMessage({ message: msg, messageIndex: idx })}
-                >
-                  Deep dive: {msg.modelCallTraces.length} model call{msg.modelCallTraces.length === 1 ? '' : 's'}
-                </button>
+                <div className="message-duration">Response time: {formatDuration(msg.durationMs)}</div>
               )}
             </div>
           )
@@ -496,37 +470,32 @@ function Task({ task, onBack, onEditName, onSendMessage, onStop, onRestart, onRe
         {task.status === 'thinking' && (
           <div className="message message-assistant thinking">
             <div className="message-label">Agent</div>
-            <div className="thinking-dots">
-              <span>thinking ...</span>
-              {activeElapsedMs != null && <span>{formatDuration(activeElapsedMs)}</span>}
+            <div className="message-content">
+              <span className="thinking-dots">thinking<span className="dot-pulse"> ...</span></span>
+              {activeElapsedMs != null && <span className="thinking-duration">{formatDuration(activeElapsedMs)}</span>}
             </div>
-          </div>
-        )}
-
-        {isClosed && (
-          <div className="closed-task-note">
-            This task is closed. Reopen it before sending another instruction.
           </div>
         )}
 
         <div ref={messagesEndRef} />
       </div>
 
+      {isClosed && (
+        <div className="closed-task-notice">This task is closed. Reopen it before sending another instruction.</div>
+      )}
+
       <div className="input-area">
         <textarea
           className="message-input"
-          placeholder={isClosed ? 'Reopen this task to continue.' : task.status === 'thinking' ? 'Waiting for response...' : 'Type your message...'}
+          placeholder={isClosed ? 'Reopen this task to send another instruction...' : 'Give an instruction...'}
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
           onKeyDown={handleKeyDown}
           disabled={task.status === 'thinking' || isClosed}
           rows={2}
         />
-        <button
-          className="btn btn-send"
-          onClick={handleSend}
-          disabled={!inputText.trim() || task.status === 'thinking' || isClosed}
-        >
+
+        <button className="btn btn-send" onClick={handleSend} disabled={!inputText.trim() || task.status === 'thinking' || isClosed}>
           Send
         </button>
       </div>
@@ -733,7 +702,7 @@ function App() {
       if (!response.ok) throw new Error(`HTTP ${response.status}`)
 
       const result = await response.json()
-      const aiMessage = { role: 'assistant', content: result.content, durationMs, modelCallTraces: Array.isArray(result.modelCallTraces) ? result.modelCallTraces : [] }
+      const aiMessage = { role: 'assistant', content: result.content, durationMs }
       const afterAgentBase = tasksRef.current.map((t) =>
         t.id === taskId
           ? { ...t, messages: [...t.messages, aiMessage], status: 'done', requestStartedAt: null, lastDurationMs: durationMs }

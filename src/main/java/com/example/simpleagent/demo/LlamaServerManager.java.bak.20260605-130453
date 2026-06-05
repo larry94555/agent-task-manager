@@ -1,14 +1,9 @@
-package com.example.simpleagent.demo;
+﻿package com.example.simpleagent.demo;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 
@@ -23,6 +18,7 @@ import java.util.logging.Logger;
 public class LlamaServerManager {
     private static final Logger logger = Logger.getLogger(LlamaServerManager.class.getName());
     private static final ObjectMapper objectMapper = new ObjectMapper();
+
     private static final String SERVER_URL = "http://localhost:8081/v1/chat/completions";
 
     private Process llamaProcess;
@@ -33,14 +29,15 @@ public class LlamaServerManager {
         try {
             ProcessBuilder pb = new ProcessBuilder(
                     "llama-server.exe",
-                    "-hf", "Qwen/Qwen2.5-Coder-14B-Instruct-GGUF:Q4_K_M",
+                    "-hf", "Qwen/Qwen2.5-3B-Instruct-GGUF:Q4_K_M",
                     "--host", "0.0.0.0",
                     "--port", "8081",
-                    "--ctx-size", "32768",
-                    "--threads", "8",
+                    "--ctx-size", "16384",
+                    "--threads", "4",
                     "-ngl", "0",
-                    "--alias", "qwen2.5-coder-14b",
-                    "--jinja");
+                    "--alias", "qwen2.5-3b-instruct",
+                    "--jinja"
+            );
 
             pb.inheritIO();
             this.llamaProcess = pb.start();
@@ -51,80 +48,38 @@ public class LlamaServerManager {
     }
 
     public String complete(List<AgentMessage> messages, double temperature, int maxTokens) {
-        return completeWithTrace(messages, temperature, maxTokens).getContent();
-    }
+        List<Map<String, String>> apiMessages = new ArrayList<>();
 
-    public LlamaCompletionResult completeWithTrace(List<AgentMessage> messages, double temperature, int maxTokens) {
-        ModelCallTrace trace = new ModelCallTrace();
-        long startedNanos = System.nanoTime();
-
-        try {
-            Map<String, Object> llamaRequest = buildLlamaRequest(messages, temperature, maxTokens);
-            String requestBody = objectMapper.writeValueAsString(llamaRequest);
-
-            trace.markStarted(temperature, maxTokens, messages == null ? 0 : messages.size(), requestBody);
-            logLlamaRequest(requestBody);
-
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-
-            ResponseEntity<String> responseEntity = restTemplate.postForEntity(
-                    SERVER_URL,
-                    new HttpEntity<>(requestBody, headers),
-                    String.class
-            );
-
-            String rawResponseBody = responseEntity.getBody();
-            Map<String, Object> response = objectMapper.readValue(
-                    rawResponseBody == null ? "{}" : rawResponseBody,
-                    new TypeReference<>() {}
-            );
-
-            String content = extractMessageContent(response);
-            trace.markSuccess(
-                    startedNanos,
-                    responseEntity.getStatusCode().value(),
-                    rawResponseBody,
-                    content
-            );
-
-            return new LlamaCompletionResult(content, trace);
-        } catch (Exception e) {
-            trace.markFailure(startedNanos, e.getMessage());
-            throw new LlamaCompletionException("llama.cpp call failed: " + e.getMessage(), trace, e);
-        }
-    }
-
-    private Map<String, Object> buildLlamaRequest(List<AgentMessage> messages, double temperature, int maxTokens) {
-        List<Map<String, Object>> apiMessages = new ArrayList<>();
-
-        if (messages != null) {
-            for (AgentMessage message : messages) {
-                Map<String, Object> apiMessage = new LinkedHashMap<>();
-                apiMessage.put("role", message.getRole());
-                apiMessage.put("content", message.getContent());
-                apiMessages.add(apiMessage);
-            }
+        for (AgentMessage message : messages) {
+            Map<String, String> apiMessage = new LinkedHashMap<>();
+            apiMessage.put("role", message.getRole());
+            apiMessage.put("content", message.getContent());
+            apiMessages.add(apiMessage);
         }
 
         Map<String, Object> llamaRequest = new LinkedHashMap<>();
         llamaRequest.put("messages", apiMessages);
         llamaRequest.put("temperature", temperature);
         llamaRequest.put("max_tokens", maxTokens);
-        return llamaRequest;
+        llamaRequest.put("max_tokens", maxTokens);
+        llamaRequest.put("cache_prompt", true);
+
+        logLlamaRequest(llamaRequest);
+
+        Map<?, ?> response = restTemplate.postForObject(SERVER_URL, llamaRequest, Map.class);
+        return extractMessageContent(response);
     }
 
-    private void logLlamaRequest(String requestBody) {
+    private void logLlamaRequest(Map<String, Object> llamaRequest) {
         try {
-            Object parsed = objectMapper.readValue(requestBody, Object.class);
-            String prettyRequest = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(parsed);
+            String prettyRequest = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(llamaRequest);
             logger.info("llamaRequest: " + System.lineSeparator() + prettyRequest);
         } catch (JsonProcessingException e) {
             logger.warning("Failed to serialize llamaRequest: " + e.getMessage());
         }
     }
 
-    private String extractMessageContent(Map<String, Object> response) {
+    private String extractMessageContent(Map<?, ?> response) {
         if (response == null) {
             throw new IllegalStateException("llama-server returned no response body.");
         }
