@@ -9,7 +9,7 @@ import java.util.List;
 
 @Service
 public class AgentLoopService {
-    private static final int MAX_ACTION_STEPS = 8;
+    private static final int MAX_ACTION_STEPS = 25;
 
     private final LlamaServerManager llamaServer;
     private final AgentActionExecutor actionExecutor;
@@ -36,7 +36,7 @@ public class AgentLoopService {
             List<String> actionTrace = new ArrayList<>();
 
             for (int step = 1; step <= MAX_ACTION_STEPS; step++) {
-                String rawModelOutput = cleanModelText(llamaServer.complete(loopMessages, 0.2, 1_600));
+                String rawModelOutput = cleanModelText(llamaServer.complete(loopMessages, 0.2, 512));
                 AgentActionRequest decision = parseDecision(rawModelOutput);
 
                 if (decision == null) {

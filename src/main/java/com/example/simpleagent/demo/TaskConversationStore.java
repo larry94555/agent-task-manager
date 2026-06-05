@@ -10,7 +10,7 @@ import java.util.concurrent.ConcurrentMap;
 
 @Component
 public class TaskConversationStore {
-    private static final int MAX_HISTORY_MESSAGES = 24;
+    private static final int MAX_HISTORY_MESSAGES = 12;
     private static final int MAX_NOTES_PER_TASK = 100;
 
     private final ConcurrentMap<String, List<AgentMessage>> historyByTask = new ConcurrentHashMap<>();

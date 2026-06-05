@@ -29,13 +29,13 @@ public class LlamaServerManager {
         try {
             ProcessBuilder pb = new ProcessBuilder(
                     "llama-server.exe",
-                    "-hf", "Qwen/Qwen2.5-Coder-14B-Instruct-GGUF:Q4_K_M",
+                    "-hf", "Qwen/Qwen2.5-3B-Instruct-GGUF:Q4_K_M",
                     "--host", "0.0.0.0",
                     "--port", "8081",
-                    "--ctx-size", "32768",
-                    "--threads", "8",
+                    "--ctx-size", "16384",
+                    "--threads", "4",
                     "-ngl", "0",
-                    "--alias", "qwen2.5-coder-14b",
+                    "--alias", "qwen2.5-3b-instruct",
                     "--jinja"
             );
 
@@ -61,6 +61,8 @@ public class LlamaServerManager {
         llamaRequest.put("messages", apiMessages);
         llamaRequest.put("temperature", temperature);
         llamaRequest.put("max_tokens", maxTokens);
+        llamaRequest.put("max_tokens", maxTokens);
+        llamaRequest.put("cache_prompt", true);
 
         logLlamaRequest(llamaRequest);
 
