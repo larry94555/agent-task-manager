@@ -1,16 +1,16 @@
-﻿import { useState, useRef, useCallback, useEffect } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import './App.css'
+import { PromptTraceDetail } from './PromptTraceDetail'
 import agentTaskImage from './assets/agent-task-orchestration.png'
 import { useScriptRunner, makeUniqueName } from './useScriptRunner'
 import { ScriptRunner } from './ScriptRunner'
 
 const API_URL = '/api/chat'
-const SESSION_FILE_VERSION = 2
+const SESSION_FILE_VERSION = 3
 const SESSION_FILE_APP = 'agent-task-manager'
 
 function formatDuration(ms) {
   if (ms == null || Number.isNaN(ms)) return ''
-
   if (ms < 1000) return `${Math.max(0, Math.round(ms))} ms`
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`
 
@@ -21,7 +21,6 @@ function formatDuration(ms) {
 
 function formatSessionTimestamp(date = new Date()) {
   const pad = (value) => String(value).padStart(2, '0')
-
   return [date.getFullYear(), pad(date.getMonth() + 1), pad(date.getDate())].join('-')
     + '-'
     + [pad(date.getHours()), pad(date.getMinutes()), pad(date.getSeconds())].join('')
@@ -34,7 +33,6 @@ function safeFilePart(value) {
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '')
-
   return cleaned || 'task'
 }
 
@@ -42,10 +40,61 @@ function hasThinkingTasks(tasks) {
   return tasks.some((task) => task.status === 'thinking')
 }
 
+function normalizePendingRequest(pending) {
+  if (!pending || typeof pending !== 'object') return null
+  if (typeof pending.text !== 'string' || !pending.text.trim()) return null
+
+  return {
+    text: pending.text,
+    createdAt: typeof pending.createdAt === 'string' ? pending.createdAt : new Date().toISOString(),
+    ...(typeof pending.savedAt === 'string' ? { savedAt: pending.savedAt } : {}),
+    ...(typeof pending.resumedAt === 'string' ? { resumedAt: pending.resumedAt } : {}),
+  }
+}
+
+function inferPendingRequestFromMessages(task, messages) {
+  if (task?.status !== 'thinking') return null
+
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i]
+    if (message?.role === 'assistant') return null
+    if (message?.role === 'user' && typeof message.content === 'string' && message.content.trim()) {
+      return {
+        text: message.content,
+        createdAt: new Date().toISOString(),
+      }
+    }
+  }
+
+  return null
+}
+
+function getPendingRequestForSave(task) {
+  const existing = normalizePendingRequest(task?.pendingRequest)
+  if (existing) {
+    return {
+      ...existing,
+      savedAt: new Date().toISOString(),
+    }
+  }
+
+  if (task?.status !== 'thinking') return null
+
+  const messages = Array.isArray(task?.messages) ? task.messages : []
+  const inferred = inferPendingRequestFromMessages(task, messages)
+  if (!inferred) return null
+
+  return {
+    ...inferred,
+    savedAt: new Date().toISOString(),
+  }
+}
+
 function normalizeTaskForSave(task) {
   return {
     ...task,
-    requestStartedAt: null,
+    pendingRequest: getPendingRequestForSave(task),
+    requestStartedAt: task.requestStartedAt ?? null,
   }
 }
 
@@ -60,7 +109,9 @@ function normalizeMessage(message) {
     ...(Number.isFinite(Number(message?.taskId)) ? { taskId: Number(message.taskId) } : {}),
     ...(Number.isFinite(Number(message?.parentTaskId)) ? { parentTaskId: Number(message.parentTaskId) } : {}),
     ...(typeof message?.taskName === 'string' ? { taskName: message.taskName } : {}),
+    ...(typeof message?.originalPrompt === 'string' ? { originalPrompt: message.originalPrompt } : {}),
     ...(Number.isFinite(Number(message?.durationMs)) ? { durationMs: Number(message.durationMs) } : {}),
+    ...(Array.isArray(message?.modelCallTraces) ? { modelCallTraces: message.modelCallTraces } : {}),
   }
 }
 
@@ -68,14 +119,18 @@ function normalizeLoadedTask(task, fallbackId) {
   const id = Number.isFinite(Number(task?.id)) ? Number(task.id) : fallbackId
   const name = typeof task?.name === 'string' && task.name.trim() ? task.name.trim() : `Task ${id}`
   const allowedStatuses = new Set(['idle', 'thinking', 'done', 'stopped'])
-  const status = allowedStatuses.has(task?.status) && task.status !== 'thinking' ? task.status : 'idle'
   const lifecycle = task?.lifecycle === 'closed' ? 'closed' : 'open'
   const createdBy = ['user', 'agent', 'script'].includes(task?.createdBy) ? task.createdBy : 'user'
   const parentTaskId = Number.isFinite(Number(task?.parentTaskId)) ? Number(task.parentTaskId) : null
-
   const messages = Array.isArray(task?.messages)
-    ? task.messages.filter((message) => message && typeof message.content === 'string').map(normalizeMessage)
+    ? task.messages
+      .filter((message) => message && typeof message.content === 'string')
+      .map(normalizeMessage)
     : []
+  const pendingRequest = normalizePendingRequest(task?.pendingRequest)
+    || inferPendingRequestFromMessages(task, messages)
+  const loadedStatus = allowedStatuses.has(task?.status) ? task.status : 'idle'
+  const status = pendingRequest ? 'thinking' : (loadedStatus === 'thinking' ? 'idle' : loadedStatus)
 
   return {
     id,
@@ -86,17 +141,25 @@ function normalizeLoadedTask(task, fallbackId) {
     createdBy,
     parentTaskId,
     createdAt: typeof task?.createdAt === 'string' ? task.createdAt : new Date().toISOString(),
-    requestStartedAt: null,
+    requestStartedAt: pendingRequest ? Date.now() : null,
     lastDurationMs: Number.isFinite(Number(task?.lastDurationMs)) ? Number(task.lastDurationMs) : null,
+    pendingRequest,
   }
 }
 
 function validateSessionFile(session) {
-  if (!session || typeof session !== 'object') throw new Error('The selected file is not a valid session JSON object.')
-  if (session.app && session.app !== SESSION_FILE_APP) throw new Error(`This file is for ${session.app}, not ${SESSION_FILE_APP}.`)
-  if (!session.state || typeof session.state !== 'object') throw new Error('The session file is missing its state object.')
-  if (!Array.isArray(session.state.tasks)) throw new Error('The session file is missing its tasks array.')
-  if (hasThinkingTasks(session.state.tasks)) throw new Error('This session contains an in-progress request. Stop or finish active requests before saving a session.')
+  if (!session || typeof session !== 'object') {
+    throw new Error('The selected file is not a valid session JSON object.')
+  }
+  if (session.app && session.app !== SESSION_FILE_APP) {
+    throw new Error(`This file is for ${session.app}, not ${SESSION_FILE_APP}.`)
+  }
+  if (!session.state || typeof session.state !== 'object') {
+    throw new Error('The session file is missing its state object.')
+  }
+  if (!Array.isArray(session.state.tasks)) {
+    throw new Error('The session file is missing its tasks array.')
+  }
 }
 
 function escapeScriptValue(value) {
@@ -143,7 +206,6 @@ async function saveTextFileWithDialog({ text, suggestedName, mimeType, descripti
         suggestedName,
         types: [{ description, accept: { [mimeType]: extensions } }],
       })
-
       const writable = await fileHandle.createWritable()
       await writable.write(text)
       await writable.close()
@@ -184,6 +246,17 @@ function taskContextLine(message) {
   return null
 }
 
+function messagesForResumedRequestContext(messages, text) {
+  if (!Array.isArray(messages) || messages.length === 0) return []
+
+  const last = messages[messages.length - 1]
+  if (last?.role === 'user' && last.content === text) {
+    return messages.slice(0, -1)
+  }
+
+  return messages
+}
+
 function createToolMessage({ action, taskId, parentTaskId, taskName, content }) {
   return {
     role: 'tool',
@@ -196,7 +269,13 @@ function createToolMessage({ action, taskId, parentTaskId, taskName, content }) 
   }
 }
 
-function applyClientTaskActions({ currentTasks, currentNextTaskId, currentSelectedTaskId, sourceTaskId, taskActions }) {
+function applyClientTaskActions({
+  currentTasks,
+  currentNextTaskId,
+  currentSelectedTaskId,
+  sourceTaskId,
+  taskActions,
+}) {
   if (!Array.isArray(taskActions) || taskActions.length === 0) {
     return { tasks: currentTasks, nextTaskId: currentNextTaskId, selectedTaskId: currentSelectedTaskId }
   }
@@ -222,8 +301,8 @@ function applyClientTaskActions({ currentTasks, currentNextTaskId, currentSelect
         createdAt: new Date().toISOString(),
         requestStartedAt: null,
         lastDurationMs: null,
+        pendingRequest: null,
       }
-
       tasks = [...tasks, newTask]
       toolMessages.push(createToolMessage({
         action: 'create_task',
@@ -232,7 +311,6 @@ function applyClientTaskActions({ currentTasks, currentNextTaskId, currentSelect
         taskName: newTask.name,
         content: `Created child task: ${newTask.name}`,
       }))
-
       if (action.switchToTask === true) selectedTaskId = newTask.id
       nextTaskId += 1
       continue
@@ -272,7 +350,11 @@ function applyClientTaskActions({ currentTasks, currentNextTaskId, currentSelect
   }
 
   if (toolMessages.length > 0) {
-    tasks = tasks.map((task) => (task.id === sourceTaskId ? { ...task, messages: [...task.messages, ...toolMessages] } : task))
+    tasks = tasks.map((task) => (
+      task.id === sourceTaskId
+        ? { ...task, messages: [...task.messages, ...toolMessages] }
+        : task
+    ))
   }
 
   return { tasks, nextTaskId, selectedTaskId }
@@ -309,6 +391,7 @@ function orderTasksForDisplay(tasks) {
   }
 
   for (const root of byParent.get(null) ?? []) visit(root)
+
   for (const task of tasks) {
     if (!ordered.some((candidate) => candidate.id === task.id)) ordered.push(task)
   }
@@ -316,16 +399,10 @@ function orderTasksForDisplay(tasks) {
   return ordered.map((task) => ({ task, depth: getTaskDepth(task, byId) }))
 }
 
-
 function shouldShowOpenTaskLink(message, currentTaskId) {
   const targetTaskId = Number(message?.taskId)
   const openTaskId = Number(currentTaskId)
-
-  return (
-    Number.isFinite(targetTaskId) &&
-    Number.isFinite(openTaskId) &&
-    targetTaskId !== openTaskId
-  )
+  return Number.isFinite(targetTaskId) && Number.isFinite(openTaskId) && targetTaskId !== openTaskId
 }
 
 function Task({ task, onBack, onEditName, onSendMessage, onStop, onRestart, onReopen, onOpenTask }) {
@@ -333,15 +410,14 @@ function Task({ task, onBack, onEditName, onSendMessage, onStop, onRestart, onRe
   const [editingName, setEditingName] = useState(false)
   const [nameDraft, setNameDraft] = useState(task.name)
   const [nowMs, setNowMs] = useState(Date.now())
+  const [deepDiveMessage, setDeepDiveMessage] = useState(null)
   const messagesRef = useRef(null)
   const messagesEndRef = useRef(null)
   const shouldAutoScrollRef = useRef(true)
-
   const isClosed = task.lifecycle === 'closed'
 
   useEffect(() => {
     if (task.status !== 'thinking') return undefined
-
     setNowMs(Date.now())
     const intervalId = window.setInterval(() => setNowMs(Date.now()), 250)
     return () => window.clearInterval(intervalId)
@@ -376,7 +452,21 @@ function Task({ task, onBack, onEditName, onSendMessage, onStop, onRestart, onRe
     setEditingName(false)
   }
 
-  const activeElapsedMs = task.status === 'thinking' && task.requestStartedAt ? nowMs - task.requestStartedAt : null
+  const activeElapsedMs = task.status === 'thinking' && task.requestStartedAt
+    ? nowMs - task.requestStartedAt
+    : null
+
+  if (deepDiveMessage) {
+    const currentMessage = task.messages[deepDiveMessage.messageIndex] ?? deepDiveMessage.message
+    return (
+      <PromptTraceDetail
+        task={task}
+        message={currentMessage}
+        messageIndex={deepDiveMessage.messageIndex}
+        onBack={() => setDeepDiveMessage(null)}
+      />
+    )
+  }
 
   return (
     <div className="task-panel">
@@ -403,33 +493,28 @@ function Task({ task, onBack, onEditName, onSendMessage, onStop, onRestart, onRe
               {task.name}
             </h3>
           )}
-
           <div className="task-meta-line">
             {task.parentTaskId != null && <span>Child of task {task.parentTaskId}</span>}
             {task.createdBy && <span>Created by {task.createdBy}</span>}
             {isClosed && <span className="task-closed-badge">Closed</span>}
           </div>
         </div>
-
         <div className="task-actions">
           {task.status === 'thinking' && (
             <button className="btn btn-stop" onClick={() => onStop(task.id)} title="Stop thinking">
               Stop
             </button>
           )}
-
           {task.status === 'stopped' && (
             <button className="btn btn-restart" onClick={() => onRestart(task.id)} title="Restart task">
               Restart
             </button>
           )}
-
           {isClosed && (
-            <button className="btn btn-secondary" onClick={() => onReopen(task.id)} title="Reopen task">
+            <button className="btn btn-restart" onClick={() => onReopen(task.id)} title="Reopen task">
               Reopen
             </button>
           )}
-
           <button className="btn btn-close" onClick={() => onBack(task.id)} title="Return to task list">
             Back to Tasks
           </button>
@@ -444,7 +529,7 @@ function Task({ task, onBack, onEditName, onSendMessage, onStop, onRestart, onRe
         {task.messages.map((msg, idx) => {
           if (msg.role === 'tool') {
             return (
-              <div key={idx} className="message message-tool">
+              <div key={idx} className="message message-assistant message-tool">
                 <div className="message-label">Task Action</div>
                 <div className="message-content">{msg.content}</div>
                 {shouldShowOpenTaskLink(msg, task.id) && (
@@ -456,12 +541,25 @@ function Task({ task, onBack, onEditName, onSendMessage, onStop, onRestart, onRe
             )
           }
 
+          const hasTrace = msg.role === 'assistant'
+            && Array.isArray(msg.modelCallTraces)
+            && msg.modelCallTraces.length > 0
+
           return (
             <div key={idx} className={`message message-${msg.role}`}>
               <div className="message-label">{msg.role === 'user' ? 'Instruction' : 'Agent'}</div>
               <div className="message-content">{msg.content}</div>
               {msg.durationMs != null && (
                 <div className="message-duration">Response time: {formatDuration(msg.durationMs)}</div>
+              )}
+              {hasTrace && (
+                <button
+                  type="button"
+                  className="message-detail-link"
+                  onClick={() => setDeepDiveMessage({ message: msg, messageIndex: idx })}
+                >
+                  Deep dive: {msg.modelCallTraces.length} model call{msg.modelCallTraces.length === 1 ? '' : 's'}
+                </button>
               )}
             </div>
           )
@@ -470,13 +568,11 @@ function Task({ task, onBack, onEditName, onSendMessage, onStop, onRestart, onRe
         {task.status === 'thinking' && (
           <div className="message message-assistant thinking">
             <div className="message-label">Agent</div>
-            <div className="message-content">
-              <span className="thinking-dots">thinking<span className="dot-pulse"> ...</span></span>
-              {activeElapsedMs != null && <span className="thinking-duration">{formatDuration(activeElapsedMs)}</span>}
+            <div className="message-content thinking-dots">
+              thinking ... {activeElapsedMs != null && <span className="thinking-duration">{formatDuration(activeElapsedMs)}</span>}
             </div>
           </div>
         )}
-
         <div ref={messagesEndRef} />
       </div>
 
@@ -487,15 +583,18 @@ function Task({ task, onBack, onEditName, onSendMessage, onStop, onRestart, onRe
       <div className="input-area">
         <textarea
           className="message-input"
-          placeholder={isClosed ? 'Reopen this task to send another instruction...' : 'Give an instruction...'}
+          placeholder={isClosed ? 'Reopen this task to continue...' : 'Type your instruction...'}
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
           onKeyDown={handleKeyDown}
           disabled={task.status === 'thinking' || isClosed}
           rows={2}
         />
-
-        <button className="btn btn-send" onClick={handleSend} disabled={!inputText.trim() || task.status === 'thinking' || isClosed}>
+        <button
+          className="btn btn-send"
+          onClick={handleSend}
+          disabled={!inputText.trim() || task.status === 'thinking' || isClosed}
+        >
           Send
         </button>
       </div>
@@ -514,9 +613,17 @@ function App() {
   const nextTaskIdRef = useRef(nextTaskId)
   const selectedTaskIdRef = useRef(selectedTaskId)
 
-  useEffect(() => { tasksRef.current = tasks }, [tasks])
-  useEffect(() => { nextTaskIdRef.current = nextTaskId }, [nextTaskId])
-  useEffect(() => { selectedTaskIdRef.current = selectedTaskId }, [selectedTaskId])
+  useEffect(() => {
+    tasksRef.current = tasks
+  }, [tasks])
+
+  useEffect(() => {
+    nextTaskIdRef.current = nextTaskId
+  }, [nextTaskId])
+
+  useEffect(() => {
+    selectedTaskIdRef.current = selectedTaskId
+  }, [selectedTaskId])
 
   const createTask = () => {
     setTasks((prev) => {
@@ -533,8 +640,8 @@ function App() {
         createdAt: new Date().toISOString(),
         requestStartedAt: null,
         lastDurationMs: null,
+        pendingRequest: null,
       }
-
       const next = [...prev, task]
       tasksRef.current = next
       nextTaskIdRef.current += 1
@@ -551,7 +658,7 @@ function App() {
 
   const reopenTask = useCallback((taskId) => {
     setTasks((prev) => {
-      const next = prev.map((task) => task.id === taskId ? { ...task, lifecycle: 'open' } : task)
+      const next = prev.map((task) => (task.id === taskId ? { ...task, lifecycle: 'open' } : task))
       tasksRef.current = next
       return next
     })
@@ -567,13 +674,142 @@ function App() {
     })
   }, [])
 
-  const saveSession = useCallback(async () => {
-    const currentTasks = tasksRef.current
-    if (hasThinkingTasks(currentTasks)) {
-      window.alert('Stop or finish active agent requests before saving the session.')
-      return
+  const sendMessage = useCallback(async (taskId, text, options = {}) => {
+    const appendUserMessage = options.appendUserMessage !== false
+    const startedAt = performance.now()
+    const userMessage = { role: 'user', content: text }
+    const currentTask = tasksRef.current.find((t) => t.id === taskId)
+    const priorMessages = currentTask ? currentTask.messages : []
+    const contextMessages = appendUserMessage
+      ? priorMessages
+      : messagesForResumedRequestContext(priorMessages, text)
+    const context = contextMessages.map(taskContextLine).filter(Boolean)
+    const pendingRequest = normalizePendingRequest(options.pendingRequest) || {
+      text,
+      createdAt: new Date().toISOString(),
     }
 
+    const afterUser = tasksRef.current.map((t) => (
+      t.id === taskId
+        ? {
+          ...t,
+          messages: appendUserMessage ? [...t.messages, userMessage] : t.messages,
+          status: 'thinking',
+          requestStartedAt: Date.now(),
+          lastDurationMs: null,
+          pendingRequest,
+        }
+        : t
+    ))
+    tasksRef.current = afterUser
+    setTasks(afterUser)
+
+    const controller = new AbortController()
+    abortControllers.current[taskId] = controller
+
+    const requestBody = {
+      taskId,
+      context,
+      latest: `user: ${text}`,
+      tasks: makeTaskSnapshot(afterUser),
+    }
+
+    try {
+      const response = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+        signal: controller.signal,
+      })
+      const durationMs = performance.now() - startedAt
+
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+
+      const result = await response.json()
+      const aiMessage = {
+        role: 'assistant',
+        content: result.content,
+        durationMs,
+        originalPrompt: text,
+        modelCallTraces: Array.isArray(result.modelCallTraces) ? result.modelCallTraces : [],
+      }
+
+      const afterAgentBase = tasksRef.current.map((t) => (
+        t.id === taskId
+          ? {
+            ...t,
+            messages: [...t.messages, aiMessage],
+            status: 'done',
+            requestStartedAt: null,
+            lastDurationMs: durationMs,
+            pendingRequest: null,
+          }
+          : t
+      ))
+
+      const applied = applyClientTaskActions({
+        currentTasks: afterAgentBase,
+        currentNextTaskId: nextTaskIdRef.current,
+        currentSelectedTaskId: selectedTaskIdRef.current,
+        sourceTaskId: taskId,
+        taskActions: result.taskActions,
+      })
+
+      tasksRef.current = applied.tasks
+      nextTaskIdRef.current = applied.nextTaskId
+      selectedTaskIdRef.current = applied.selectedTaskId
+      setTasks(applied.tasks)
+      setNextTaskId(applied.nextTaskId)
+      setSelectedTaskId(applied.selectedTaskId)
+      return result.updatedSummary
+    } catch (err) {
+      const durationMs = performance.now() - startedAt
+
+      if (err.name === 'AbortError') {
+        const afterAbort = tasksRef.current.map((t) => (
+          t.id === taskId
+            ? {
+              ...t,
+              status: 'stopped',
+              requestStartedAt: null,
+              lastDurationMs: durationMs,
+              pendingRequest: null,
+            }
+            : t
+        ))
+        tasksRef.current = afterAbort
+        setTasks(afterAbort)
+        return undefined
+      }
+
+      const errorMessage = {
+        role: 'assistant',
+        content: `Error: ${err.message}`,
+        durationMs,
+        originalPrompt: text,
+      }
+      const afterError = tasksRef.current.map((t) => (
+        t.id === taskId
+          ? {
+            ...t,
+            messages: [...t.messages, errorMessage],
+            status: 'done',
+            requestStartedAt: null,
+            lastDurationMs: durationMs,
+            pendingRequest: null,
+          }
+          : t
+      ))
+      tasksRef.current = afterError
+      setTasks(afterError)
+      return undefined
+    } finally {
+      delete abortControllers.current[taskId]
+    }
+  }, [])
+
+  const saveSession = useCallback(async () => {
+    const currentTasks = tasksRef.current
     const session = {
       app: SESSION_FILE_APP,
       version: SESSION_FILE_VERSION,
@@ -626,7 +862,6 @@ function App() {
       window.alert('Stop or finish active agent requests before loading another session.')
       return
     }
-
     loadSessionInputRef.current?.click()
   }, [])
 
@@ -648,6 +883,7 @@ function App() {
         ? session.state.selectedTaskId
         : null
       const loadedScriptStatus = typeof session.state.scriptStatus === 'string' ? session.state.scriptStatus : ''
+      const pendingTasks = loadedTasks.filter((task) => task.pendingRequest?.text)
 
       tasksRef.current = loadedTasks
       nextTaskIdRef.current = loadedNextTaskId
@@ -655,101 +891,29 @@ function App() {
       setTasks(loadedTasks)
       setNextTaskId(loadedNextTaskId)
       setSelectedTaskId(loadedSelectedTaskId)
-      setScriptStatus(loadedScriptStatus)
+      setScriptStatus(
+        pendingTasks.length > 0
+          ? `Loaded session. Resuming ${pendingTasks.length} pending request${pendingTasks.length === 1 ? '' : 's'}...`
+          : loadedScriptStatus
+      )
+
+      if (pendingTasks.length > 0) {
+        window.setTimeout(() => {
+          pendingTasks.forEach((task) => {
+            sendMessage(task.id, task.pendingRequest.text, {
+              appendUserMessage: false,
+              pendingRequest: {
+                ...task.pendingRequest,
+                resumedAt: new Date().toISOString(),
+              },
+            })
+          })
+        }, 0)
+      }
     } catch (err) {
       window.alert(`Could not load session: ${err.message}`)
     }
-  }, [])
-
-  const sendMessage = useCallback(async (taskId, text) => {
-    const startedAt = performance.now()
-    const userMessage = { role: 'user', content: text }
-    const currentTask = tasksRef.current.find((t) => t.id === taskId)
-    const priorMessages = currentTask ? currentTask.messages : []
-
-    const context = priorMessages
-      .map(taskContextLine)
-      .filter(Boolean)
-
-    const afterUser = tasksRef.current.map((t) =>
-      t.id === taskId
-        ? { ...t, messages: [...t.messages, userMessage], status: 'thinking', requestStartedAt: Date.now(), lastDurationMs: null }
-        : t
-    )
-
-    tasksRef.current = afterUser
-    setTasks(afterUser)
-
-    const controller = new AbortController()
-    abortControllers.current[taskId] = controller
-
-    const requestBody = {
-      taskId,
-      context,
-      latest: `user: ${text}`,
-      tasks: makeTaskSnapshot(afterUser),
-    }
-
-    try {
-      const response = await fetch(API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody),
-        signal: controller.signal,
-      })
-
-      const durationMs = performance.now() - startedAt
-      if (!response.ok) throw new Error(`HTTP ${response.status}`)
-
-      const result = await response.json()
-      const aiMessage = { role: 'assistant', content: result.content, durationMs }
-      const afterAgentBase = tasksRef.current.map((t) =>
-        t.id === taskId
-          ? { ...t, messages: [...t.messages, aiMessage], status: 'done', requestStartedAt: null, lastDurationMs: durationMs }
-          : t
-      )
-
-      const applied = applyClientTaskActions({
-        currentTasks: afterAgentBase,
-        currentNextTaskId: nextTaskIdRef.current,
-        currentSelectedTaskId: selectedTaskIdRef.current,
-        sourceTaskId: taskId,
-        taskActions: result.taskActions,
-      })
-
-      tasksRef.current = applied.tasks
-      nextTaskIdRef.current = applied.nextTaskId
-      selectedTaskIdRef.current = applied.selectedTaskId
-      setTasks(applied.tasks)
-      setNextTaskId(applied.nextTaskId)
-      setSelectedTaskId(applied.selectedTaskId)
-
-      return result.updatedSummary
-    } catch (err) {
-      const durationMs = performance.now() - startedAt
-
-      if (err.name === 'AbortError') {
-        const afterAbort = tasksRef.current.map((t) =>
-          t.id === taskId ? { ...t, status: 'stopped', requestStartedAt: null, lastDurationMs: durationMs } : t
-        )
-        tasksRef.current = afterAbort
-        setTasks(afterAbort)
-        return undefined
-      }
-
-      const errorMessage = { role: 'assistant', content: `Error: ${err.message}`, durationMs }
-      const afterError = tasksRef.current.map((t) =>
-        t.id === taskId
-          ? { ...t, messages: [...t.messages, errorMessage], status: 'done', requestStartedAt: null, lastDurationMs: durationMs }
-          : t
-      )
-      tasksRef.current = afterError
-      setTasks(afterError)
-      return undefined
-    } finally {
-      delete abortControllers.current[taskId]
-    }
-  }, [])
+  }, [sendMessage])
 
   const stopThinking = useCallback((taskId) => {
     abortControllers.current[taskId]?.abort()
@@ -757,15 +921,19 @@ function App() {
 
   const restartTask = useCallback((taskId) => {
     setTasks((prev) => {
-      const next = prev.map((t) => t.id === taskId ? { ...t, status: 'idle', requestStartedAt: null } : t)
+      const next = prev.map((t) => (
+        t.id === taskId
+          ? { ...t, status: 'idle', requestStartedAt: null, pendingRequest: null }
+          : t
+      ))
       tasksRef.current = next
       return next
     })
   }, [])
 
   const selectedTask = tasks.find((t) => t.id === selectedTaskId)
-  const sessionActionDisabled = hasThinkingTasks(tasks)
-  const saveTaskScriptDisabled = sessionActionDisabled || !selectedTask
+  const hasActiveRequests = hasThinkingTasks(tasks)
+  const saveTaskScriptDisabled = hasActiveRequests || !selectedTask
   const displayedTasks = orderTasksForDisplay(tasks)
   const openDisplayedTasks = displayedTasks.filter(({ task }) => task.lifecycle !== 'closed')
   const closedDisplayedTasks = displayedTasks.filter(({ task }) => task.lifecycle === 'closed')
@@ -790,7 +958,13 @@ function App() {
         {task.name}
       </span>
       <span className={`task-status status-${task.status}`}>
-        {task.status === 'thinking' ? 'Running' : task.status === 'stopped' ? 'Stopped' : task.lifecycle === 'closed' ? 'Closed' : ''}
+        {task.status === 'thinking'
+          ? 'Running'
+          : task.status === 'stopped'
+            ? 'Stopped'
+            : task.lifecycle === 'closed'
+              ? 'Closed'
+              : ''}
       </span>
     </li>
   )
@@ -805,12 +979,17 @@ function App() {
             <p>The simple agent that runs locally on your machine.</p>
           </div>
         </div>
-
         <div className="header-actions">
-          <button className="btn btn-secondary" onClick={saveSession} disabled={sessionActionDisabled}>Save Session</button>
-          <button className="btn btn-secondary" onClick={openLoadSessionPicker} disabled={sessionActionDisabled}>Load Session</button>
+          <button className="btn btn-secondary" onClick={saveSession}>Save Session</button>
+          <button className="btn btn-secondary" onClick={openLoadSessionPicker} disabled={hasActiveRequests}>Load Session</button>
           <button className="btn btn-secondary" onClick={saveSelectedTaskAsScript} disabled={saveTaskScriptDisabled}>Save Task Script</button>
-          <input ref={loadSessionInputRef} className="session-file-input" type="file" accept="application/json,.json" onChange={handleLoadSessionFile} />
+          <input
+            ref={loadSessionInputRef}
+            className="session-file-input"
+            type="file"
+            accept="application/json,.json"
+            onChange={handleLoadSessionFile}
+          />
           <button className="btn btn-primary" onClick={createTask}>+ New Agent Task</button>
         </div>
       </header>
@@ -818,14 +997,12 @@ function App() {
       <div className="main-layout">
         <aside className="task-list">
           <h2>Agent Tasks</h2>
-
           {tasks.length === 0 ? (
             <div className="no-tasks">No agent tasks yet.<br />Create one and give Dumb Barton a goal.</div>
           ) : (
             <>
               <div className="task-section-label">Open Tasks</div>
               <ul>{openDisplayedTasks.map(renderTaskListItem)}</ul>
-
               {closedDisplayedTasks.length > 0 && (
                 <>
                   <div className="task-section-label closed-label">Closed Tasks</div>
@@ -834,7 +1011,6 @@ function App() {
               )}
             </>
           )}
-
           <ScriptRunner onRun={runScript} scriptStatus={scriptStatus} />
         </aside>
 
@@ -855,13 +1031,18 @@ function App() {
             <div className="task-picker">
               <h2>Select an agent task</h2>
               <p>Choose an existing task or create a new one.</p>
-
               <div className="task-picker-grid">
                 {tasks.map((task) => (
                   <button key={task.id} className="task-picker-card" onClick={() => setSelectedTaskId(task.id)}>
                     <span className="task-picker-name">{task.name}</span>
                     <span className={`task-status status-${task.status}`}>
-                      {task.status === 'thinking' ? 'Running' : task.lifecycle === 'closed' ? 'Closed' : task.status === 'stopped' ? 'Stopped' : 'Open'}
+                      {task.status === 'thinking'
+                        ? 'Running'
+                        : task.lifecycle === 'closed'
+                          ? 'Closed'
+                          : task.status === 'stopped'
+                            ? 'Stopped'
+                            : 'Open'}
                     </span>
                   </button>
                 ))}
@@ -869,10 +1050,17 @@ function App() {
             </div>
           ) : (
             <div className="no-task-selected">
-              <img className="no-task-hero" src={agentTaskImage} alt="AI agent hub connected to goals, questions, and task cards" />
+              <img
+                className="no-task-hero"
+                src={agentTaskImage}
+                alt="AI agent hub connected to goals, questions, and task cards"
+              />
               <div className="empty-state-badge">Local agent workspace</div>
               <h2>Give Dumb Barton a goal.</h2>
-              <p>Create an agent task, then ask a question, define an objective, or give a concrete instruction. This is not just a chat window. It is a workspace for directing a local agent running on your machine.</p>
+              <p>
+                Create an agent task, then ask a question, define an objective, or give a concrete instruction.
+                This is not just a chat window. It is a workspace for directing a local agent running on your machine.
+              </p>
               <button className="btn btn-primary empty-state-button" onClick={createTask}>Create Agent Task</button>
             </div>
           )}
@@ -883,4 +1071,3 @@ function App() {
 }
 
 export default App
-

@@ -1,4 +1,4 @@
-﻿package com.example.simpleagent.demo;
+package com.example.simpleagent.demo;
 
 import java.util.List;
 
@@ -40,4 +40,3 @@ public class ChatRequest {
         this.tasks = tasks;
     }
 }
-
