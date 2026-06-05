@@ -316,6 +316,18 @@ function orderTasksForDisplay(tasks) {
   return ordered.map((task) => ({ task, depth: getTaskDepth(task, byId) }))
 }
 
+
+function shouldShowOpenTaskLink(message, currentTaskId) {
+  const targetTaskId = Number(message?.taskId)
+  const openTaskId = Number(currentTaskId)
+
+  return (
+    Number.isFinite(targetTaskId) &&
+    Number.isFinite(openTaskId) &&
+    targetTaskId !== openTaskId
+  )
+}
+
 function Task({ task, onBack, onEditName, onSendMessage, onStop, onRestart, onReopen, onOpenTask }) {
   const [inputText, setInputText] = useState('')
   const [editingName, setEditingName] = useState(false)
@@ -435,7 +447,7 @@ function Task({ task, onBack, onEditName, onSendMessage, onStop, onRestart, onRe
               <div key={idx} className="message message-tool">
                 <div className="message-label">Task Action</div>
                 <div className="message-content">{msg.content}</div>
-                {msg.taskId != null && (
+                {shouldShowOpenTaskLink(msg, task.id) && (
                   <button className="btn btn-inline" onClick={() => onOpenTask(msg.taskId)}>
                     Open Task
                   </button>
