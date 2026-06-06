@@ -1,4 +1,4 @@
-﻿package com.example.simpleagent.demo;
+package com.example.simpleagent.demo;
 
 import org.springframework.stereotype.Component;
 
@@ -70,8 +70,8 @@ public class AgentActionExecutor {
                 Purpose: Fetch a public web page and return public http/https links found on that page.
                 Input: {"url": "https://example.com/page", "sameDomainOnly": true, "maxLinks": 20}
 
-                10. web_search
-                Purpose: Search the public web and return candidate result URLs.
+                10. web_extract_topics Purpose: Fetch a public web page and extract prominent topic-like items from the static HTML. This generalizes headlines for news sites, article titles for content sites, and section/documentation topics for reference or technical sites. Input: {"url": "https://example.com/page", "maxTopics": 10, "topicHint": "optional user request or filter"} Use this when the user asks what topics, headlines, titles, stories, posts, sections, or current items are found on a specific page. Alias: web_extract_topic.
+11. web_search Purpose: Search the public web and return candidate result URLs.
                 Input: {"query": "search terms", "maxResults": 5}
                 Free-first provider order: DuckDuckGo by default; SearXNG when WEB_SEARCH_PROVIDER=searxng or SEARXNG_BASE_URL is configured; Brave only when WEB_SEARCH_PROVIDER=brave is explicitly configured.
 
@@ -100,8 +100,7 @@ public class AgentActionExecutor {
             case "list_tasks" -> listTasks(chatRequest);
             case "web_fetch_url" -> webFetchUrl(actionRequest.getInput());
             case "web_page_outline" -> webPageOutline(actionRequest.getInput());
-            case "web_extract_links" -> webExtractLinks(actionRequest.getInput());
-            case "web_search" -> webSearch(actionRequest.getInput());
+            case "web_extract_links" -> webExtractLinks(actionRequest.getInput()); case "web_extract_topics", "web_extract_topic" -> webExtractTopics(actionRequest.getInput()); case "web_search" -> webSearch(actionRequest.getInput());
             case "web_research" -> webResearch(actionRequest.getInput());
             default -> ActionExecutionResult.failure("Unknown or disallowed action: " + action);
         };
@@ -193,7 +192,7 @@ public class AgentActionExecutor {
             int maxChars = webToolPolicy.boundedInt(input.get("maxChars"), WebToolPolicy.DEFAULT_MAX_CHARS, 1_000, WebToolPolicy.MAX_EXTRACTED_CHARS);
             return ActionExecutionResult.success(webReadOnlyToolService.webFetchUrl(url, maxChars));
         } catch (Exception e) {
-            return ActionExecutionResult.failure("web_fetch_url failed: " + e.getMessage());
+            return ActionExecutionResult.failure(WebToolErrorCode.URL_NOT_ACCESSIBLE.name(), "web_fetch_url failed: " + e.getMessage());
         }
     }
 
@@ -201,7 +200,7 @@ public class AgentActionExecutor {
         try {
             return ActionExecutionResult.success(webReadOnlyToolService.webPageOutline(clean(String.valueOf(input.getOrDefault("url", "")))));
         } catch (Exception e) {
-            return ActionExecutionResult.failure("web_page_outline failed: " + e.getMessage());
+            return ActionExecutionResult.failure(WebToolErrorCode.URL_NOT_ACCESSIBLE.name(), "web_page_outline failed: " + e.getMessage());
         }
     }
 
@@ -212,17 +211,28 @@ public class AgentActionExecutor {
             int maxLinks = webToolPolicy.boundedInt(input.get("maxLinks"), WebToolPolicy.DEFAULT_MAX_LINKS, 1, WebToolPolicy.MAX_LINKS);
             return ActionExecutionResult.success(webReadOnlyToolService.webExtractLinks(url, sameDomainOnly, maxLinks));
         } catch (Exception e) {
-            return ActionExecutionResult.failure("web_extract_links failed: " + e.getMessage());
+            return ActionExecutionResult.failure(WebToolErrorCode.URL_NOT_ACCESSIBLE.name(), "web_extract_links failed: " + e.getMessage());
         }
     }
-
-    private ActionExecutionResult webSearch(Map<String, Object> input) {
+private ActionExecutionResult webExtractTopics(Map input) {
+    try {
+        String url = clean(String.valueOf(input.getOrDefault("url", "")));
+        int maxTopics = webToolPolicy.boundedInt(input.get("maxTopics"), 10, 1, 50);
+        String topicHint = clean(String.valueOf(input.getOrDefault("topicHint", "")));
+        return ActionExecutionResult.success(webReadOnlyToolService.webExtractTopics(url, maxTopics, topicHint));
+    } catch (IllegalArgumentException e) {
+        return ActionExecutionResult.failure(WebToolErrorCode.URL_NOT_ALLOWED.name(), "web_extract_topics failed: " + e.getMessage());
+    } catch (Exception e) {
+        return ActionExecutionResult.failure(WebToolErrorCode.WEB_TOPIC_EXTRACTION_FAILED.name(), "web_extract_topics failed: " + e.getMessage());
+    }
+}
+private ActionExecutionResult webSearch(Map<String, Object> input) {
         try {
             String query = clean(String.valueOf(input.getOrDefault("query", "")));
             int maxResults = webToolPolicy.boundedInt(input.get("maxResults"), WebToolPolicy.DEFAULT_SEARCH_RESULTS, 1, WebToolPolicy.MAX_SEARCH_RESULTS);
             return ActionExecutionResult.success(freeWebSearchService.webSearch(query, maxResults));
         } catch (Exception e) {
-            return ActionExecutionResult.failure("web_search failed: " + e.getMessage());
+            return ActionExecutionResult.failure(WebToolErrorCode.SEARCH_PROVIDER_UNAVAILABLE.name(), "web_search failed: " + e.getMessage());
         }
     }
 
@@ -234,7 +244,7 @@ public class AgentActionExecutor {
             int maxPassagesPerSource = webToolPolicy.boundedInt(input.get("maxPassagesPerSource"), 3, 1, 5);
             return ActionExecutionResult.success(freeWebSearchService.webResearch(query, maxResults, maxPagesToFetch, maxPassagesPerSource));
         } catch (Exception e) {
-            return ActionExecutionResult.failure("web_research failed: " + e.getMessage());
+            return ActionExecutionResult.failure(WebToolErrorCode.WEB_RESEARCH_FAILED.name(), "web_research failed: " + e.getMessage());
         }
     }
 

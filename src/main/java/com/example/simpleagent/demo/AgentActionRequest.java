@@ -1,4 +1,4 @@
-﻿package com.example.simpleagent.demo;
+package com.example.simpleagent.demo;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
