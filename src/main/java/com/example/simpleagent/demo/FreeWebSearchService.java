@@ -1,4 +1,4 @@
-﻿package com.example.simpleagent.demo;
+package com.example.simpleagent.demo;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;

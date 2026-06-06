@@ -1,4 +1,4 @@
-﻿package com.example.simpleagent.demo;
+package com.example.simpleagent.demo;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
