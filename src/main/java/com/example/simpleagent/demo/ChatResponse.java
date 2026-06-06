@@ -7,6 +7,7 @@ public class ChatResponse {
     private String content;
     private List<ClientTaskAction> taskActions = new ArrayList<>();
     private List<ModelCallTrace> modelCallTraces = new ArrayList<>();
+    private List<WebToolTrace> webToolTraces = new ArrayList<>();
 
     public ChatResponse() {
     }
@@ -28,6 +29,18 @@ public class ChatResponse {
         this.content = content;
         this.taskActions = taskActions == null ? new ArrayList<>() : taskActions;
         this.modelCallTraces = modelCallTraces == null ? new ArrayList<>() : modelCallTraces;
+    }
+
+    public ChatResponse(
+            String content,
+            List<ClientTaskAction> taskActions,
+            List<ModelCallTrace> modelCallTraces,
+            List<WebToolTrace> webToolTraces
+    ) {
+        this.content = content;
+        this.taskActions = taskActions == null ? new ArrayList<>() : taskActions;
+        this.modelCallTraces = modelCallTraces == null ? new ArrayList<>() : modelCallTraces;
+        this.webToolTraces = webToolTraces == null ? new ArrayList<>() : webToolTraces;
     }
 
     public String getContent() {
@@ -52,5 +65,13 @@ public class ChatResponse {
 
     public void setModelCallTraces(List<ModelCallTrace> modelCallTraces) {
         this.modelCallTraces = modelCallTraces == null ? new ArrayList<>() : modelCallTraces;
+    }
+
+    public List<WebToolTrace> getWebToolTraces() {
+        return webToolTraces;
+    }
+
+    public void setWebToolTraces(List<WebToolTrace> webToolTraces) {
+        this.webToolTraces = webToolTraces == null ? new ArrayList<>() : webToolTraces;
     }
 }

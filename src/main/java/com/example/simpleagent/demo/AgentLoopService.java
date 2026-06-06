@@ -1,9 +1,11 @@
-﻿package com.example.simpleagent.demo;
+package com.example.simpleagent.demo;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -31,6 +33,7 @@ public class AgentLoopService {
     public ChatResponse run(ChatRequest request) {
         List<ClientTaskAction> clientTaskActions = new ArrayList<>();
         List<ModelCallTrace> modelCallTraces = new ArrayList<>();
+        List<WebToolTrace> webToolTraces = new ArrayList<>();
 
         try {
             List<AgentMessage> loopMessages = buildInitialMessages(request);
@@ -46,7 +49,8 @@ public class AgentLoopService {
                     return new ChatResponse(
                             "Error running agent loop: " + e.getMessage(),
                             clientTaskActions,
-                            modelCallTraces
+                            modelCallTraces,
+                            webToolTraces
                     );
                 }
 
@@ -54,7 +58,7 @@ public class AgentLoopService {
                 AgentActionRequest decision = parseDecision(rawModelOutput);
 
                 if (decision == null) {
-                    return finish(request, rawModelOutput, clientTaskActions, modelCallTraces);
+                    return finish(request, rawModelOutput, clientTaskActions, modelCallTraces, webToolTraces);
                 }
 
                 if (decision.isFinal()) {
@@ -62,11 +66,31 @@ public class AgentLoopService {
                     if (finalAnswer.isBlank()) {
                         finalAnswer = "I completed the request, but the model returned an empty final answer.";
                     }
-                    return finish(request, finalAnswer, clientTaskActions, modelCallTraces);
+                    return finish(request, finalAnswer, clientTaskActions, modelCallTraces, webToolTraces);
                 }
 
                 if (decision.isAction()) {
-                    ActionExecutionResult result = actionExecutor.execute(request, decision);
+                    Instant actionStartedAt = Instant.now();
+                    long actionStartedNanos = System.nanoTime();
+                    ActionExecutionResult result;
+                    try {
+                        result = actionExecutor.execute(request, decision);
+                    } catch (Exception e) {
+                        result = ActionExecutionResult.failure(
+                                WebToolErrorCode.INTERNAL_ERROR.name(),
+                                "Action execution failed: " + e.getMessage()
+                        );
+                    }
+
+                    WebToolTrace toolTrace = WebToolTrace.completed(
+                            step,
+                            decision.getAction(),
+                            jsonInput(decision),
+                            actionStartedAt,
+                            actionStartedNanos,
+                            result
+                    );
+                    webToolTraces.add(toolTrace);
                     actionTrace.add(formatActionTrace(step, decision, result));
 
                     if (result.getClientTaskAction() != null) {
@@ -78,14 +102,15 @@ public class AgentLoopService {
                             ACTION RESULT:
                             %s
 
-                            Continue the agent loop. Return exactly one JSON object.
+                            Continue the agent loop.
+                            Return exactly one JSON object.
                             If you have enough information to answer the user, return:
                             {"type":"final","content":"your answer"}
                             """.formatted(result.getObservation())));
                     continue;
                 }
 
-                return finish(request, rawModelOutput, clientTaskActions, modelCallTraces);
+                return finish(request, rawModelOutput, clientTaskActions, modelCallTraces, webToolTraces);
             }
 
             return finish(
@@ -93,13 +118,15 @@ public class AgentLoopService {
                     "I hit the maximum number of action steps before finishing.\nHere is what happened:\n"
                             + String.join("\n", actionTrace),
                     clientTaskActions,
-                    modelCallTraces
+                    modelCallTraces,
+                    webToolTraces
             );
         } catch (Exception e) {
             return new ChatResponse(
                     "Error running agent loop: " + e.getMessage(),
                     clientTaskActions,
-                    modelCallTraces
+                    modelCallTraces,
+                    webToolTraces
             );
         }
     }
@@ -156,8 +183,8 @@ public class AgentLoopService {
                 - Do not wrap the JSON in Markdown.
                 - Do not invent action names.
                 - Call at most one action at a time.
-                - Use web_research when the user asks for a researched answer about current/public information and does not provide a specific URL.
-- Use web_search when the user asks only for a list of search results or candidate URLs.
+                - Use web_research when the user asks for a researched answer, comparison, recommendation, or summary about current/public information and does not provide a specific URL.
+                - Use web_search only when the user asks for a list of search results, source candidates, or candidate URLs.
                 - Use web_fetch_url when the user provides a specific public URL to read.
                 - Use web_page_outline when the user asks what is on a page or asks for an outline of a page.
                 - Use web_extract_links when the user asks what links/resources are on a page.
@@ -178,11 +205,11 @@ public class AgentLoopService {
         if (request.getContext() == null || request.getContext().isEmpty()) {
             return "(none)";
         }
-
         StringBuilder sb = new StringBuilder();
         int step = 1;
-        for (String line : request.getContext()) {
-            if (line != null && !line.isBlank()) {
+        for (Object object : request.getContext()) {
+            String line = object == null ? "" : String.valueOf(object);
+            if (!line.isBlank()) {
                 sb.append(step++).append(") ").append(line).append("\n");
             }
         }
@@ -193,9 +220,11 @@ public class AgentLoopService {
         if (request.getTasks() == null || request.getTasks().isEmpty()) {
             return "(none)";
         }
-
         StringBuilder sb = new StringBuilder();
-        for (TaskSnapshot task : request.getTasks()) {
+        for (Object object : request.getTasks()) {
+            if (!(object instanceof TaskSnapshot task)) {
+                continue;
+            }
             sb.append("- id=").append(task.getId())
                     .append(", name=\"").append(clean(task.getName())).append("\"")
                     .append(", status=").append(clean(task.getStatus()))
@@ -211,11 +240,12 @@ public class AgentLoopService {
             ChatRequest request,
             String finalAnswer,
             List<ClientTaskAction> clientTaskActions,
-            List<ModelCallTrace> modelCallTraces
+            List<ModelCallTrace> modelCallTraces,
+            List<WebToolTrace> webToolTraces
     ) {
         String cleanedAnswer = cleanModelText(finalAnswer);
         conversationStore.appendUserAssistantTurn(request, request.getLatest(), cleanedAnswer);
-        return new ChatResponse(cleanedAnswer, clientTaskActions, modelCallTraces);
+        return new ChatResponse(cleanedAnswer, clientTaskActions, modelCallTraces, webToolTraces);
     }
 
     private AgentActionRequest parseDecision(String rawModelOutput) {
@@ -223,7 +253,6 @@ public class AgentLoopService {
         if (json == null) {
             return null;
         }
-
         try {
             return objectMapper.readValue(json, AgentActionRequest.class);
         } catch (Exception ignored) {
@@ -235,7 +264,6 @@ public class AgentLoopService {
         if (text == null) {
             return null;
         }
-
         int start = text.indexOf('{');
         if (start < 0) {
             return null;
@@ -244,10 +272,8 @@ public class AgentLoopService {
         boolean inString = false;
         boolean escaped = false;
         int depth = 0;
-
         for (int i = start; i < text.length(); i++) {
             char c = text.charAt(i);
-
             if (escaped) {
                 escaped = false;
                 continue;
@@ -270,14 +296,22 @@ public class AgentLoopService {
                 }
             }
         }
-
         return null;
+    }
+
+    private String jsonInput(AgentActionRequest decision) {
+        try {
+            return objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(decision.getInput());
+        } catch (JsonProcessingException e) {
+            return String.valueOf(decision.getInput());
+        }
     }
 
     private String formatActionTrace(int step, AgentActionRequest decision, ActionExecutionResult result) {
         return "step=" + step
                 + ", action=" + decision.getAction()
                 + ", success=" + result.isSuccess()
+                + (result.getErrorCode() == null ? "" : ", errorCode=" + result.getErrorCode())
                 + ", observation=" + result.getObservation();
     }
 
@@ -285,7 +319,6 @@ public class AgentLoopService {
         if (value == null) {
             return "";
         }
-
         String cleaned = value.replaceAll("(?is)<think>.*?</think>", "").trim();
         if (cleaned.startsWith("```json")) {
             cleaned = cleaned.substring("```json".length()).trim();

@@ -1,0 +1,12 @@
+package com.example.simpleagent.demo;
+
+public enum WebToolErrorCode {
+    INVALID_INPUT,
+    URL_NOT_ALLOWED,
+    URL_NOT_ACCESSIBLE,
+    UNSUPPORTED_CONTENT_TYPE,
+    TOO_MANY_REQUESTS,
+    SEARCH_PROVIDER_UNAVAILABLE,
+    WEB_RESEARCH_FAILED,
+    INTERNAL_ERROR
+}

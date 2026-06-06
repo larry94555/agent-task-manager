@@ -1,4 +1,4 @@
-﻿package com.example.simpleagent.demo;
+package com.example.simpleagent.demo;
 
 import org.springframework.stereotype.Component;
 
@@ -193,7 +193,7 @@ public class AgentActionExecutor {
             int maxChars = webToolPolicy.boundedInt(input.get("maxChars"), WebToolPolicy.DEFAULT_MAX_CHARS, 1_000, WebToolPolicy.MAX_EXTRACTED_CHARS);
             return ActionExecutionResult.success(webReadOnlyToolService.webFetchUrl(url, maxChars));
         } catch (Exception e) {
-            return ActionExecutionResult.failure("web_fetch_url failed: " + e.getMessage());
+            return ActionExecutionResult.failure(WebToolErrorCode.URL_NOT_ACCESSIBLE.name(), "web_fetch_url failed: " + e.getMessage());
         }
     }
 
@@ -201,7 +201,7 @@ public class AgentActionExecutor {
         try {
             return ActionExecutionResult.success(webReadOnlyToolService.webPageOutline(clean(String.valueOf(input.getOrDefault("url", "")))));
         } catch (Exception e) {
-            return ActionExecutionResult.failure("web_page_outline failed: " + e.getMessage());
+            return ActionExecutionResult.failure(WebToolErrorCode.URL_NOT_ACCESSIBLE.name(), "web_page_outline failed: " + e.getMessage());
         }
     }
 
@@ -212,7 +212,7 @@ public class AgentActionExecutor {
             int maxLinks = webToolPolicy.boundedInt(input.get("maxLinks"), WebToolPolicy.DEFAULT_MAX_LINKS, 1, WebToolPolicy.MAX_LINKS);
             return ActionExecutionResult.success(webReadOnlyToolService.webExtractLinks(url, sameDomainOnly, maxLinks));
         } catch (Exception e) {
-            return ActionExecutionResult.failure("web_extract_links failed: " + e.getMessage());
+            return ActionExecutionResult.failure(WebToolErrorCode.URL_NOT_ACCESSIBLE.name(), "web_extract_links failed: " + e.getMessage());
         }
     }
 
@@ -222,7 +222,7 @@ public class AgentActionExecutor {
             int maxResults = webToolPolicy.boundedInt(input.get("maxResults"), WebToolPolicy.DEFAULT_SEARCH_RESULTS, 1, WebToolPolicy.MAX_SEARCH_RESULTS);
             return ActionExecutionResult.success(freeWebSearchService.webSearch(query, maxResults));
         } catch (Exception e) {
-            return ActionExecutionResult.failure("web_search failed: " + e.getMessage());
+            return ActionExecutionResult.failure(WebToolErrorCode.SEARCH_PROVIDER_UNAVAILABLE.name(), "web_search failed: " + e.getMessage());
         }
     }
 
@@ -234,7 +234,7 @@ public class AgentActionExecutor {
             int maxPassagesPerSource = webToolPolicy.boundedInt(input.get("maxPassagesPerSource"), 3, 1, 5);
             return ActionExecutionResult.success(freeWebSearchService.webResearch(query, maxResults, maxPagesToFetch, maxPassagesPerSource));
         } catch (Exception e) {
-            return ActionExecutionResult.failure("web_research failed: " + e.getMessage());
+            return ActionExecutionResult.failure(WebToolErrorCode.WEB_RESEARCH_FAILED.name(), "web_research failed: " + e.getMessage());
         }
     }
 
