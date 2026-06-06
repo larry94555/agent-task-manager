@@ -417,22 +417,33 @@ private void addFragmentLinkSectionCandidates(Document doc, List<PageTopicCandid
 
 private String headingUrl(Element heading, URI finalUri) {
     String base = stripFragment(finalUri == null ? "" : finalUri.toString());
-    String id = firstNonBlank(heading.id(), "");
+    if (heading == null) {
+        return base;
+    }
+
+    String id = heading.id();
+    if (id == null) {
+        id = "";
+    }
+
     if (id.isBlank()) {
         Element idChild = heading.selectFirst("[id]");
         if (idChild != null) {
-            id = idChild.id();
+            String childId = idChild.id();
+            id = childId == null ? "" : childId;
         }
     }
+
     if (id.isBlank() && heading.parent() != null) {
-        id = heading.parent().id();
+        String parentId = heading.parent().id();
+        id = parentId == null ? "" : parentId;
     }
+
     if (id.isBlank()) {
         return base;
     }
     return base + "#" + id;
 }
-
 private String stripFragment(String url) {
     if (url == null) {
         return "";
