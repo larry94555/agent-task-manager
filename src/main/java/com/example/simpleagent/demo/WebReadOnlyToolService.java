@@ -1,4 +1,4 @@
-package com.example.simpleagent.demo;
+﻿package com.example.simpleagent.demo;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -175,15 +175,13 @@ public class WebReadOnlyToolService {
 public String webExtractTopics(String url, int maxTopics, String topicHint) throws IOException, InterruptedException {
     int boundedMaxTopics = policy.boundedInt(maxTopics, 10, 1, 50);
     String hint = topicHint == null ? "" : topicHint.trim();
+
     FetchedDocument fetched = fetchDocument(url);
     Document doc = fetched.document;
+    TopicExtractionMode mode = determineTopicExtractionMode(doc, fetched.finalUri, hint);
 
     List<PageTopicCandidate> candidates = new ArrayList<>();
-
-    addJsonLdTopicCandidates(doc, candidates, fetched.finalUri.toString(), hint);
-    addMetaTopicCandidates(doc, candidates, fetched.finalUri.toString(), hint);
-    addHeadingTopicCandidates(doc, candidates, fetched.finalUri.toString(), hint);
-    addArticleAndLinkTopicCandidates(doc, candidates, fetched.finalUri, hint);
+    addTopicCandidatesForMode(doc, candidates, fetched.finalUri, hint, mode);
 
     List<PageTopicCandidate> ranked = rankAndDedupeTopicCandidates(candidates, boundedMaxTopics);
 
@@ -194,36 +192,239 @@ public String webExtractTopics(String url, int maxTopics, String topicHint) thro
     sb.append("Content-Type: ").append(fetched.contentType).append("\n");
     sb.append("Retrieved-At: ").append(Instant.now()).append("\n");
     sb.append("Page title: ").append(emptyIfBlank(doc.title())).append("\n");
+    sb.append("Extraction mode: ").append(mode).append("\n");
+
     if (!hint.isBlank()) {
         sb.append("Topic hint from user request: ").append(limit(hint, 300)).append("\n");
     }
-    sb.append("Requested topics/items: ").append(boundedMaxTopics).append("\n");
+
+    sb.append("Maximum extracted topics/items: ").append(boundedMaxTopics).append("\n");
     sb.append("Extracted topics/items: ").append(ranked.size()).append("\n\n");
 
     if (ranked.isEmpty()) {
-        sb.append("No topic-like items were found in the static HTML. Do not invent topics, headlines, titles, or items that are not present in the tool result.");
+        sb.append("No topic-like items were found in the static HTML.\n");
+        sb.append("Do not invent topics, headlines, titles, sections, or items that are not present in the tool result.");
         return sb.toString();
     }
 
     int i = 1;
     for (PageTopicCandidate topic : ranked) {
         sb.append(i).append(". ").append(topic.text).append("\n");
-        sb.append("   Type: ").append(topic.kind).append("\n");
+        sb.append(" Type: ").append(topic.kind).append("\n");
         if (topic.url != null && !topic.url.isBlank()) {
-            sb.append("   URL: ").append(topic.url).append("\n");
+            sb.append(" URL: ").append(topic.url).append("\n");
         }
         i++;
     }
 
     if (ranked.size() < boundedMaxTopics) {
-        sb.append("\nOnly ").append(ranked.size()).append(" topic-like items were extracted from the static HTML. Do not invent additional items to reach ").append(boundedMaxTopics).append(".");
+        sb.append("\nOnly ").append(ranked.size())
+                .append(" topic-like items were extracted from the static HTML. Do not invent additional items to reach ")
+                .append(boundedMaxTopics).append(".");
     }
 
-    sb.append("\n\nUse only the extracted topics/items above when answering. If the user asked for headlines, treat topic items from article/title/link candidates as headline candidates. If the user asked for documentation or encyclopedia topics, treat heading/section candidates as page topics.");
+    sb.append("\n\nUse only the extracted topics/items above when answering.\n");
+    sb.append("For ARTICLES mode, story/title/link candidates may be treated as headline candidates.\n");
+    sb.append("For SECTIONS mode, heading candidates should be treated as page sections or main topics.\n");
+    sb.append("If more items were extracted than the user requested, return only the number the user requested.");
     return sb.toString().trim();
 }
 
-private void addJsonLdTopicCandidates(Document doc, List<PageTopicCandidate> candidates, String baseUrl, String hint) {
+private enum TopicExtractionMode {
+    ARTICLES,
+    SECTIONS
+}
+
+private void addTopicCandidatesForMode(
+        Document doc,
+        List<PageTopicCandidate> candidates,
+        URI finalUri,
+        String hint,
+        TopicExtractionMode mode
+) {
+    if (mode == TopicExtractionMode.SECTIONS) {
+        addSectionTopicCandidates(doc, candidates, finalUri, hint);
+
+        // Fallback: some pages do not use semantic main/article containers.
+        // If section mode finds too little, add general headings but still avoid links and metadata.
+        if (candidates.size() < 3) {
+            addHeadingTopicCandidates(doc, candidates, finalUri.toString(), hint);
+        }
+        return;
+    }
+
+    // Article mode intentionally preserves the broad behavior that worked for Fox News:
+    // metadata + JSON-LD + headings + article/card/story links.
+    addJsonLdTopicCandidates(doc, candidates, finalUri.toString(), hint);
+    addMetaTopicCandidates(doc, candidates, finalUri.toString(), hint);
+    addHeadingTopicCandidates(doc, candidates, finalUri.toString(), hint);
+    addArticleAndLinkTopicCandidates(doc, candidates, finalUri, hint);
+}
+
+private TopicExtractionMode determineTopicExtractionMode(Document doc, URI finalUri, String hint) {
+    String lowerHint = hint == null ? "" : hint.toLowerCase(Locale.ROOT);
+    String host = finalUri == null || finalUri.getHost() == null ? "" : finalUri.getHost().toLowerCase(Locale.ROOT);
+    String path = finalUri == null || finalUri.getPath() == null ? "" : finalUri.getPath().toLowerCase(Locale.ROOT);
+    String title = doc == null ? "" : doc.title().toLowerCase(Locale.ROOT);
+
+    if (containsAny(lowerHint, "headline", "headlines", "story", "stories", "article", "articles", "news", "post", "posts")) {
+        return TopicExtractionMode.ARTICLES;
+    }
+
+    if (containsAny(lowerHint, "section", "sections", "topic", "topics", "main topics", "documentation", "docs", "reference")) {
+        return TopicExtractionMode.SECTIONS;
+    }
+
+    if (host.contains("wikipedia.org") || host.startsWith("docs.") || host.contains(".readthedocs.")
+            || path.contains("/wiki/") || path.contains("/docs/") || path.contains("/documentation/")
+            || path.contains("/reference/") || title.contains("documentation")) {
+        return TopicExtractionMode.SECTIONS;
+    }
+
+    return TopicExtractionMode.ARTICLES;
+}
+
+private boolean containsAny(String value, String... needles) {
+    if (value == null || value.isBlank()) {
+        return false;
+    }
+    for (String needle : needles) {
+        if (needle != null && !needle.isBlank() && value.contains(needle)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+private void addSectionTopicCandidates(Document doc, List<PageTopicCandidate> candidates, URI finalUri, String hint) {
+    String baseUrl = finalUri == null ? "" : finalUri.toString();
+
+    // Prefer the real content area. This keeps Wikipedia/docs pages from returning
+    // sidebars, "Back to top", "Edit this page", footer links, or page tools.
+    String selector = String.join(", ",
+            "#mw-content-text .mw-heading h2",
+            "#mw-content-text .mw-heading h3",
+            "#mw-content-text .mw-parser-output > h2",
+            "#mw-content-text .mw-parser-output > h3",
+            "#mw-content-text h2",
+            "#mw-content-text h3",
+            "main h1",
+            "main h2",
+            "main h3",
+            "main h4",
+            "article h1",
+            "article h2",
+            "article h3",
+            "article h4",
+            "[role=main] h1",
+            "[role=main] h2",
+            "[role=main] h3",
+            "[role=main] h4",
+            ".document h1",
+            ".document h2",
+            ".document h3",
+            ".body h1",
+            ".body h2",
+            ".body h3",
+            ".content h1",
+            ".content h2",
+            ".content h3",
+            "section h1",
+            "section h2",
+            "section h3"
+    );
+
+    for (Element heading : doc.select(selector)) {
+        if (isInsidePageChrome(heading)) {
+            continue;
+        }
+
+        String text = cleanSectionTopicText(heading.text());
+        if (!looksLikeUsefulSectionTopicText(text)) {
+            continue;
+        }
+
+        String tag = heading.tagName().toLowerCase(Locale.ROOT);
+        int baseScore = switch (tag) {
+            case "h1" -> 120;
+            case "h2" -> 110;
+            case "h3" -> 95;
+            default -> 80;
+        };
+
+        if (isInsideMainContent(heading)) {
+            baseScore += 20;
+        }
+
+        addTopicCandidate(candidates, text, baseUrl, "section/" + tag, scoreWithHint(text, hint, baseScore));
+    }
+}
+
+private boolean isInsideMainContent(Element element) {
+    for (Element current = element; current != null; current = current.parent()) {
+        String tag = current.tagName().toLowerCase(Locale.ROOT);
+        String marker = (current.id() + " " + current.className() + " " + current.attr("role")).toLowerCase(Locale.ROOT);
+        if (tag.equals("main") || tag.equals("article") || marker.contains("mw-content-text")
+                || marker.contains("mw-parser-output") || marker.contains("document")
+                || marker.contains("content") || marker.contains("main")) {
+            return true;
+        }
+    }
+    return false;
+}
+
+private boolean isInsidePageChrome(Element element) {
+    for (Element current = element; current != null; current = current.parent()) {
+        String tag = current.tagName().toLowerCase(Locale.ROOT);
+        if (tag.equals("nav") || tag.equals("header") || tag.equals("footer") || tag.equals("aside")) {
+            return true;
+        }
+
+        String marker = (current.id() + " " + current.className() + " " + current.attr("role")).toLowerCase(Locale.ROOT);
+        if (marker.matches(".*\\b(nav|navigation|navbar|sidebar|toc|breadcrumb|breadcrumbs|footer|header|menu|page-tools|pagetools|related|version|versions|search|catlinks|mw-navigation|vector-page-tools|vector-toc|site-footer|wy-nav-side|rst-footer-buttons)\\b.*")) {
+            return true;
+        }
+    }
+    return false;
+}
+
+private String cleanSectionTopicText(String text) {
+    return cleanTopicText(text)
+            .replace("[edit]", "")
+            .replace("edit", "")
+            .replaceAll("^\\d+(?:\\.\\d+)*\\s+", "")
+            .replaceAll("\\s+", " ")
+            .trim();
+}
+
+private boolean looksLikeUsefulSectionTopicText(String text) {
+    if (!looksLikeUsefulTopicText(text)) {
+        return false;
+    }
+
+    String lower = cleanTopicText(text).toLowerCase(Locale.ROOT);
+    if (lower.matches("^(contents|table of contents|back to top|view this page|edit this page|edit on github|user information|navigation|navigation menu|main page|personal tools|tools|appearance|hide|show|download as pdf|printable version|permanent link|page information|cite this page|wikidata item|languages|in other projects)$")) {
+        return false;
+    }
+
+    if (lower.matches("^(references|external links|further reading|bibliography|notes|sources|see also)$")) {
+        return false;
+    }
+
+    return !lower.contains("wikipedia indefinitely")
+            && !lower.contains("wikimedia projects")
+            && !lower.contains("privacy policy")
+            && !lower.contains("terms of use")
+            && !lower.contains("developers statistics")
+            && !lower.contains("cookie statement");
+}
+
+private void addJsonLdTopicCandidates(
+        Document doc,
+        List<PageTopicCandidate> candidates,
+        String baseUrl,
+        String hint
+) {
     for (Element script : doc.select("script[type=application/ld+json]")) {
         String json = script.data();
         if (json == null || json.isBlank()) {
@@ -232,6 +433,7 @@ private void addJsonLdTopicCandidates(Document doc, List<PageTopicCandidate> can
         if (json == null || json.isBlank()) {
             continue;
         }
+
         try {
             JsonNode node = objectMapper.readTree(json);
             collectJsonTopicCandidates(node, candidates, baseUrl, hint);
@@ -241,16 +443,23 @@ private void addJsonLdTopicCandidates(Document doc, List<PageTopicCandidate> can
     }
 }
 
-private void collectJsonTopicCandidates(JsonNode node, List<PageTopicCandidate> candidates, String baseUrl, String hint) {
+private void collectJsonTopicCandidates(
+        JsonNode node,
+        List<PageTopicCandidate> candidates,
+        String baseUrl,
+        String hint
+) {
     if (node == null || node.isMissingNode() || node.isNull()) {
         return;
     }
+
     if (node.isArray()) {
         for (JsonNode child : node) {
             collectJsonTopicCandidates(child, candidates, baseUrl, hint);
         }
         return;
     }
+
     if (!node.isObject()) {
         return;
     }
@@ -267,15 +476,21 @@ private void collectJsonTopicCandidates(JsonNode node, List<PageTopicCandidate> 
         candidates.add(new PageTopicCandidate(name.trim(), itemUrl, "json-ld", scoreWithHint(name, hint, baseScore)));
     }
 
-    java.util.Iterator<java.util.Map.Entry<String, JsonNode>> fields = node.fields();
+    java.util.Iterator<Map.Entry<String, JsonNode>> fields = node.fields();
     while (fields.hasNext()) {
-        java.util.Map.Entry<String, JsonNode> field = fields.next();
+        Map.Entry<String, JsonNode> field = fields.next();
         collectJsonTopicCandidates(field.getValue(), candidates, baseUrl, hint);
     }
 }
 
-private void addMetaTopicCandidates(Document doc, List<PageTopicCandidate> candidates, String baseUrl, String hint) {
+private void addMetaTopicCandidates(
+        Document doc,
+        List<PageTopicCandidate> candidates,
+        String baseUrl,
+        String hint
+) {
     addTopicCandidate(candidates, doc.title(), baseUrl, "page-title", scoreWithHint(doc.title(), hint, 105));
+
     for (Element meta : doc.select("meta[property=og:title], meta[name=twitter:title], meta[name=description], meta[property=og:description]")) {
         String content = meta.attr("content").trim();
         if (looksLikeUsefulTopicText(content)) {
@@ -284,12 +499,22 @@ private void addMetaTopicCandidates(Document doc, List<PageTopicCandidate> candi
     }
 }
 
-private void addHeadingTopicCandidates(Document doc, List<PageTopicCandidate> candidates, String baseUrl, String hint) {
+private void addHeadingTopicCandidates(
+        Document doc,
+        List<PageTopicCandidate> candidates,
+        String baseUrl,
+        String hint
+) {
     for (Element heading : doc.select("main h1, main h2, main h3, main h4, article h1, article h2, article h3, article h4, h1, h2, h3, h4")) {
-        String text = heading.text().trim();
+        if (isInsidePageChrome(heading)) {
+            continue;
+        }
+
+        String text = cleanSectionTopicText(heading.text());
         if (!looksLikeUsefulTopicText(text)) {
             continue;
         }
+
         String tag = heading.tagName().toLowerCase(Locale.ROOT);
         int baseScore = switch (tag) {
             case "h1" -> 120;
@@ -297,11 +522,17 @@ private void addHeadingTopicCandidates(Document doc, List<PageTopicCandidate> ca
             case "h3" -> 90;
             default -> 75;
         };
+
         candidates.add(new PageTopicCandidate(text, baseUrl, tag, scoreWithHint(text, hint, baseScore)));
     }
 }
 
-private void addArticleAndLinkTopicCandidates(Document doc, List<PageTopicCandidate> candidates, URI finalUri, String hint) {
+private void addArticleAndLinkTopicCandidates(
+        Document doc,
+        List<PageTopicCandidate> candidates,
+        URI finalUri,
+        String hint
+) {
     String selector = String.join(", ",
             "article a[href]",
             "main a[href]",
@@ -317,10 +548,15 @@ private void addArticleAndLinkTopicCandidates(Document doc, List<PageTopicCandid
     );
 
     for (Element link : doc.select(selector)) {
-        String text = link.text().trim();
+        if (isInsidePageChrome(link)) {
+            continue;
+        }
+
+        String text = cleanTopicText(link.text());
         if (!looksLikeUsefulTopicText(text)) {
             continue;
         }
+
         String href = link.absUrl("href").trim();
         if (href.isBlank()) {
             href = finalUri.toString();
@@ -330,6 +566,7 @@ private void addArticleAndLinkTopicCandidates(Document doc, List<PageTopicCandid
         String hrefLower = href.toLowerCase(Locale.ROOT);
         String classLower = link.className() == null ? "" : link.className().toLowerCase(Locale.ROOT);
         String parentClass = link.parent() == null ? "" : link.parent().className().toLowerCase(Locale.ROOT);
+
         if (hrefLower.matches(".*(/news/|/article/|/articles/|/story/|/stories/|/politics/|/business/|/sports/|/tech/|/science/|/world/|/us/|/entertainment/|/opinion/|/docs/|/wiki/).*")) {
             baseScore += 25;
         }
@@ -339,20 +576,27 @@ private void addArticleAndLinkTopicCandidates(Document doc, List<PageTopicCandid
         if (sameHost(finalUri, href)) {
             baseScore += 10;
         }
+
         candidates.add(new PageTopicCandidate(text, href, "link/topic", scoreWithHint(text, hint, baseScore)));
     }
 }
 
-private List<PageTopicCandidate> rankAndDedupeTopicCandidates(List<PageTopicCandidate> candidates, int maxTopics) {
+private List<PageTopicCandidate> rankAndDedupeTopicCandidates(
+        List<PageTopicCandidate> candidates,
+        int maxTopics
+) {
     Map<String, PageTopicCandidate> bestByKey = new LinkedHashMap<>();
+
     for (PageTopicCandidate candidate : candidates) {
         if (candidate == null || !looksLikeUsefulTopicText(candidate.text)) {
             continue;
         }
+
         String normalized = normalizeTopicKey(candidate.text);
         if (normalized.isBlank()) {
             continue;
         }
+
         PageTopicCandidate existing = bestByKey.get(normalized);
         if (existing == null || candidate.score > existing.score) {
             bestByKey.put(normalized, candidate.withText(limit(cleanTopicText(candidate.text), 240)));
@@ -361,13 +605,21 @@ private List<PageTopicCandidate> rankAndDedupeTopicCandidates(List<PageTopicCand
 
     List<PageTopicCandidate> ranked = new ArrayList<>(bestByKey.values());
     ranked.sort((a, b) -> Integer.compare(b.score, a.score));
+
     if (ranked.size() > maxTopics) {
         return new ArrayList<>(ranked.subList(0, maxTopics));
     }
+
     return ranked;
 }
 
-private void addTopicCandidate(List<PageTopicCandidate> candidates, String text, String url, String kind, int score) {
+private void addTopicCandidate(
+        List<PageTopicCandidate> candidates,
+        String text,
+        String url,
+        String kind,
+        int score
+) {
     if (looksLikeUsefulTopicText(text)) {
         candidates.add(new PageTopicCandidate(text.trim(), url, kind, score));
     }
@@ -377,6 +629,7 @@ private int scoreWithHint(String text, String hint, int baseScore) {
     if (text == null || hint == null || hint.isBlank()) {
         return baseScore;
     }
+
     String lowerText = text.toLowerCase(Locale.ROOT);
     int score = baseScore;
     for (String token : hint.toLowerCase(Locale.ROOT).split("[^a-z0-9]+")) {
@@ -402,10 +655,12 @@ private boolean looksLikeUsefulTopicText(String text) {
     if (text == null) {
         return false;
     }
+
     String cleaned = cleanTopicText(text);
     if (cleaned.length() < 8 || cleaned.length() > 260) {
         return false;
     }
+
     String lower = cleaned.toLowerCase(Locale.ROOT);
     if (lower.matches("^(home|menu|search|sign in|log in|login|subscribe|newsletter|advertise|privacy policy|terms of use|terms|cookies|careers|contact|about|more|watch|video|live|shop|account)$")) {
         return false;
@@ -413,6 +668,7 @@ private boolean looksLikeUsefulTopicText(String text) {
     if (lower.contains("cookie") || lower.contains("enable javascript") || lower.contains("please disable your ad blocker")) {
         return false;
     }
+
     int letters = 0;
     for (int i = 0; i < cleaned.length(); i++) {
         if (Character.isLetter(cleaned.charAt(i))) {
@@ -426,6 +682,7 @@ private String cleanTopicText(String text) {
     if (text == null) {
         return "";
     }
+
     return text.replace('\u00a0', ' ')
             .replaceAll("\\s+", " ")
             .trim();
@@ -455,6 +712,7 @@ private static class PageTopicCandidate {
         return new PageTopicCandidate(newText, url, kind, score);
     }
 }
+
 public String webSearch(String query, int maxResults) throws IOException, InterruptedException {
         if (query == null || query.trim().isEmpty()) {
             throw new IllegalArgumentException("web_search requires a nonblank query.");
@@ -840,4 +1098,5 @@ public String webSearch(String query, int maxResults) throws IOException, Interr
         }
     }
 }
+
 

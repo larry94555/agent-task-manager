@@ -1,4 +1,4 @@
-package com.example.simpleagent.demo;
+﻿package com.example.simpleagent.demo;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
@@ -58,7 +58,7 @@ public class AgentLoopService {
 PREFLIGHT WEB PAGE TOPIC EXTRACTION RESULT:
 %s
 
-Use this extracted page data to answer the current request. Do not invent topics, headlines, titles, links, or sections that are not present in the tool result. If fewer items were extracted than the user requested, say how many were found.
+Use this extracted page data to answer the current request. Do not invent topics, headlines, titles, links, or sections that are not present in the tool result. If fewer items were extracted than the user requested, say how many were found. If more items were extracted than the user requested, return only the number the user requested.
 """.formatted(result.getObservation())));
             }
 
@@ -169,7 +169,8 @@ Continue the agent loop. Return exactly one JSON object. If you have enough info
 
         Map<String, Object> input = new LinkedHashMap<>();
         input.put("url", url);
-        input.put("maxTopics", requestedTopicCount(latest, 10));
+        int requestedCount = requestedTopicCount(latest, 10);
+input.put("maxTopics", Math.min(50, requestedCount + 5));
         input.put("topicHint", latest == null ? "" : latest);
         action.setInput(input);
         return Optional.of(action);
