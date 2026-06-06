@@ -1,4 +1,4 @@
-package com.example.simpleagent.demo;
+﻿package com.example.simpleagent.demo;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -156,7 +156,8 @@ public class AgentLoopService {
                 - Do not wrap the JSON in Markdown.
                 - Do not invent action names.
                 - Call at most one action at a time.
-                - Use web_search when the user asks for current/public information and does not provide a URL.
+                - Use web_research when the user asks for a researched answer about current/public information and does not provide a specific URL.
+- Use web_search when the user asks only for a list of search results or candidate URLs.
                 - Use web_fetch_url when the user provides a specific public URL to read.
                 - Use web_page_outline when the user asks what is on a page or asks for an outline of a page.
                 - Use web_extract_links when the user asks what links/resources are on a page.
