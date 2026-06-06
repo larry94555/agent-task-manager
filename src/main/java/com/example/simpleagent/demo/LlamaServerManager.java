@@ -33,13 +33,13 @@ public class LlamaServerManager {
         try {
             ProcessBuilder pb = new ProcessBuilder(
                     "llama-server.exe",
-                    "-hf", "Qwen/Qwen2.5-Coder-14B-Instruct-GGUF:Q4_K_M",
+                    "-hf", "Qwen/Qwen2.5-3B-Instruct-GGUF:Q4_K_M",
                     "--host", "0.0.0.0",
                     "--port", "8081",
-                    "--ctx-size", "32768",
+                    "--ctx-size", "8192",
                     "--threads", "8",
                     "-ngl", "0",
-                    "--alias", "qwen2.5-coder-14b",
+                    "--alias", "qwen2.5-3b-instruct",
                     "--jinja");
 
             pb.inheritIO();
