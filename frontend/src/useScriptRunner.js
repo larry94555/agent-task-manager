@@ -1,4 +1,4 @@
-﻿import { useCallback, useRef } from 'react'
+import { useCallback, useRef } from 'react'
 
 const VALID_ACTIONS = ['TASK', 'POST_AND_WAIT']
 

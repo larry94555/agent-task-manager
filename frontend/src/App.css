@@ -947,7 +947,7 @@ body {
   white-space: pre-wrap;
 }
 
-.trace-toggle {
+.trace-goal-box { border: 1px solid #67e8f9; background: #ecfeff; color: #155e75; border-radius: 12px; padding: 12px; margin-bottom: 12px; white-space: pre-wrap; } .trace-toggle {
   white-space: nowrap;
 }
 
@@ -991,3 +991,81 @@ body {
   }
 }
 
+
+/* Deep Dive primary prompt/response section titles. */
+.trace-primary-text-section {
+  margin: 18px 0 22px;
+}
+.trace-primary-title {
+  margin: 0 0 10px;
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: #e0f2fe;
+  letter-spacing: 0.01em;
+}
+.trace-text-box-header-compact {
+  justify-content: flex-end;
+}
+
+/* Deep Dive prompt/final response readability overrides. */
+.trace-section-label {
+  margin: 12px 0 6px;
+  color: #111827;
+  background: #ffffff;
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.trace-toggle {
+  background: #ffffff;
+  color: #111827;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.trace-toggle:hover {
+  background: #f8fafc;
+  border-color: #94a3b8;
+}
+
+.trace-toggle:focus-visible {
+  outline: 2px solid #93c5fd;
+  outline-offset: 2px;
+}
+/* End Deep Dive prompt/final response readability overrides. */
+/* Deep Dive textarea toggle placement overrides. */
+.trace-text-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.trace-textarea {
+  margin-bottom: 0;
+}
+
+.trace-toggle.trace-toggle-attached {
+  align-self: flex-end;
+  margin-top: -1px;
+  border-radius: 0 0 10px 10px;
+  border: 1px solid rgba(15, 23, 42, 0.18);
+  background: #ffffff;
+  color: #111827;
+  font-weight: 600;
+  padding: 8px 12px;
+}
+
+.trace-toggle.trace-toggle-attached:hover {
+  background: #f8fafc;
+}
+
+.trace-section-label {
+  color: #111827;
+  background: transparent;
+}
+/* End Deep Dive textarea toggle placement overrides. */

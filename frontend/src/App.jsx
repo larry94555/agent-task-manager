@@ -128,7 +128,7 @@ function normalizeLoadedTask(task, fallbackId) {
       .map(normalizeMessage)
     : []
   const pendingRequest = normalizePendingRequest(task?.pendingRequest)
-    || inferPendingRequestFromMessages(task, messages)
+ || inferPendingRequestFromMessages(task, messages)
   const loadedStatus = allowedStatuses.has(task?.status) ? task.status : 'idle'
   const status = pendingRequest ? 'thinking' : (loadedStatus === 'thinking' ? 'idle' : loadedStatus)
 
