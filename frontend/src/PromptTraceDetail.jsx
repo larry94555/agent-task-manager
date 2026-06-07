@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 
 function formatDuration(ms) {
   if (ms == null || Number.isNaN(Number(ms))) return ''
@@ -10,8 +10,12 @@ function formatDuration(ms) {
   return `${minutes}m ${seconds}s`
 }
 
+function normalizeText(value) {
+  return String(value ?? '')
+}
+
 function previewText(value, maxChars = 80) {
-  const text = String(value ?? '')
+  const text = normalizeText(value)
   const normalized = text.replace(/\s+/g, ' ').trim()
   if (!normalized) return '(empty)'
   return normalized.length > maxChars ? `${normalized.slice(0, maxChars)}...` : normalized
@@ -19,28 +23,63 @@ function previewText(value, maxChars = 80) {
 
 function TraceTextBox({ value }) {
   const [expanded, setExpanded] = useState(false)
-  const text = String(value ?? '')
-  const displayValue = expanded ? text : previewText(text)
+  const textareaRef = useRef(null)
+  const text = normalizeText(value)
+  const preview = useMemo(() => previewText(text), [text])
+  const isTruncated = preview !== text && preview.endsWith('...')
+  const displayValue = expanded ? text : preview
+
+  function toggleExpanded() {
+    setExpanded((current) => !current)
+  }
+
+  function handleTextareaMouseUp() {
+    if (expanded || !isTruncated) {
+      return
+    }
+    const textarea = textareaRef.current
+    if (!textarea) {
+      return
+    }
+    const caret = Number(textarea.selectionStart)
+    if (!Number.isFinite(caret)) {
+      return
+    }
+    const ellipsisStart = Math.max(0, displayValue.length - 3)
+    if (caret >= ellipsisStart) {
+      setExpanded(true)
+    }
+  }
+
+  function handleTextareaKeyDown(event) {
+    if (expanded || !isTruncated) {
+      return
+    }
+    if ((event.key === 'Enter' || event.key === ' ') && event.currentTarget.selectionStart >= Math.max(0, displayValue.length - 3)) {
+      event.preventDefault()
+      setExpanded(true)
+    }
+  }
+
   return (
     <section className="trace-text-box">
-      <div className="trace-text-heading">
-        <div className="trace-text-meta" />
-        <button
-          type="button"
-          className="trace-toggle"
-          onClick={() => setExpanded((current) => !current)}
-        >
-          {expanded ? 'Collapse' : 'Open full text'}
-        </button>
-      </div>
       <textarea
+        ref={textareaRef}
         className="trace-textarea"
         value={displayValue}
         readOnly
-        spellCheck={false}
-        rows={expanded ? 16 : 4}
+        rows={expanded ? 16 : 6}
         onFocus={(event) => event.currentTarget.select()}
+        onMouseUp={handleTextareaMouseUp}
+        onKeyDown={handleTextareaKeyDown}
       />
+      <button
+        type="button"
+        className="trace-toggle trace-toggle-attached"
+        onClick={toggleExpanded}
+      >
+        {expanded ? 'Collapse' : 'Open full text'}
+      </button>
     </section>
   )
 }
@@ -78,10 +117,8 @@ function PlanTraceCard({ trace, index }) {
         </div>
         <div className="trace-status success">plan</div>
       </div>
-
       <SectionLabel>Plan Summary</SectionLabel>
       <TraceTextBox value={trace?.observation} />
-
       <SectionLabel>Plan JSON</SectionLabel>
       <TraceTextBox value={trace?.input} />
     </article>
@@ -107,16 +144,13 @@ function ToolTraceCard({ trace, index }) {
         </div>
         <div className={`trace-status ${status}`}>{statusText}</div>
       </div>
-
       {trace?.planStepGoal && (
         <div className="trace-goal-box">
           Goal: {trace.planStepGoal}
         </div>
       )}
-
       <SectionLabel>Action Input</SectionLabel>
       <TraceTextBox value={trace?.input} />
-
       <SectionLabel>Tool Observation Returned To The Agent Loop</SectionLabel>
       <TraceTextBox value={trace?.observation} />
     </article>
@@ -159,12 +193,13 @@ export function PromptTraceDetail({ task, message, messageIndex, onBack }) {
       {planTraces.length > 0 && (
         <section className="trace-tool-section">
           <h2>Visible Execution Plan</h2>
-          <p>
-            The plan is generated before tool execution. Each plan step should correspond to a tool action below with the
-            same Step ID.
-          </p>
+          <p>Each plan step should correspond to a tool action below with the same Step ID.</p>
           {planTraces.map((trace, index) => (
-            <PlanTraceCard key={`${trace.planId ?? index}-${trace.startedAt ?? index}`} trace={trace} index={index} />
+            <PlanTraceCard
+              key={`${trace.planId ?? index}-${trace.startedAt ?? index}`}
+              trace={trace}
+              index={index}
+            />
           ))}
         </section>
       )}
@@ -172,17 +207,20 @@ export function PromptTraceDetail({ task, message, messageIndex, onBack }) {
       {toolTraces.length > 0 && (
         <section className="trace-tool-section">
           <h2>Plan/Tool Actions</h2>
-          <p>These are the executed actions. Plan-backed actions use numbering such as Step 1.1 and Step 1.2.</p>
+          <p>Plan-backed actions use numbering such as Step 1.1 and Step 1.2.</p>
           {toolTraces.map((trace, index) => (
-            <ToolTraceCard key={`${trace.displayStep ?? trace.step ?? index}-${trace.startedAt ?? index}`} trace={trace} index={index} />
+            <ToolTraceCard
+              key={`${trace.displayStep ?? trace.step ?? index}-${trace.startedAt ?? index}`}
+              trace={trace}
+              index={index}
+            />
           ))}
         </section>
       )}
 
       {traces.length === 0 ? (
         <div className="trace-empty-state">
-          No llama.cpp prompt trace was attached to this message. New responses will include traces after the backend patch is
-          running.
+          No llama.cpp prompt trace was attached to this message. New responses will include traces after the backend patch is running.
         </div>
       ) : (
         <section className="trace-model-section">
@@ -210,15 +248,11 @@ export function PromptTraceDetail({ task, message, messageIndex, onBack }) {
                   </div>
                   <div className={`trace-status ${trace.success ? 'success' : 'failure'}`}>{statusText}</div>
                 </div>
-
                 {trace.error && <div className="trace-error-box">{trace.error}</div>}
-
                 <SectionLabel>Prompt Sent To llama.cpp</SectionLabel>
                 <TraceTextBox value={trace.prompt} />
-
                 <SectionLabel>Raw Response Returned By llama.cpp</SectionLabel>
                 <TraceTextBox value={trace.response} />
-
                 <SectionLabel>Extracted Assistant Content</SectionLabel>
                 <TraceTextBox value={trace.extractedContent} />
               </article>

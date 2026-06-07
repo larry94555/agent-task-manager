@@ -1038,3 +1038,34 @@ body {
   outline-offset: 2px;
 }
 /* End Deep Dive prompt/final response readability overrides. */
+/* Deep Dive textarea toggle placement overrides. */
+.trace-text-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.trace-textarea {
+  margin-bottom: 0;
+}
+
+.trace-toggle.trace-toggle-attached {
+  align-self: flex-end;
+  margin-top: -1px;
+  border-radius: 0 0 10px 10px;
+  border: 1px solid rgba(15, 23, 42, 0.18);
+  background: #ffffff;
+  color: #111827;
+  font-weight: 600;
+  padding: 8px 12px;
+}
+
+.trace-toggle.trace-toggle-attached:hover {
+  background: #f8fafc;
+}
+
+.trace-section-label {
+  color: #111827;
+  background: transparent;
+}
+/* End Deep Dive textarea toggle placement overrides. */
