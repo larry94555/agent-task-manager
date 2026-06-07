@@ -19,6 +19,11 @@ import java.util.regex.Pattern;
 @Service
 public class AgentLoopService {
     private static final int MAX_ACTION_STEPS = 6;
+    private static final int MAX_PLAN_STEPS = 8;
+    private static final int DEFAULT_TOPIC_COUNT = 10;
+    private static final int PLAN_OBSERVATION_CHAR_LIMIT = 14_000;
+    private static final int PLAN_SYNTHESIS_MAX_TOKENS = 2_000;
+
     private static final Pattern PUBLIC_URL_PATTERN = Pattern.compile("https?:/{1,2}[^\\s)\\]}>\\\"']+", Pattern.CASE_INSENSITIVE);
     private static final Pattern TOPIC_COUNT_PATTERN = Pattern.compile("(?i)\\b(\\d{1,2})\\s+(?:real\\s+|current\\s+|actual\\s+)?(?:headlines?|topics?|titles?|items?|articles?|stories?|sections?|posts?)\\b");
 
@@ -46,32 +51,35 @@ public class AgentLoopService {
         List<String> actionTrace = new ArrayList<>();
 
         try {
+            ExecutionPlan plan = buildExecutionPlan(request);
             List<AgentMessage> loopMessages = buildInitialMessages(request);
-            String latest = request == null ? null : request.getLatest();
-            List<PlannedWebAction> preflightPlan = buildPreflightTopicExtractions(latest);
 
-            if (!preflightPlan.isEmpty()) {
-                addPlanTrace(preflightPlan, webToolTraces);
-                String preflightResult = executePreflightPlan(request, preflightPlan, clientTaskActions, webToolTraces, actionTrace);
+            if (plan.hasSteps()) {
+                addPlanTrace(plan, webToolTraces);
+                String planResult = executePlan(request, plan, clientTaskActions, webToolTraces, actionTrace);
                 loopMessages.add(AgentMessage.user("""
-                        PREFLIGHT MULTI-SOURCE WEB PLAN RESULTS:
+                        EXECUTION PLAN RESULTS:
                         %s
 
-                        Use these source-separated results to answer the current request.
+                        Use these plan results to answer the current request.
                         Important rules:
-                        - Keep each source separate in the final answer.
-                        - If a source status is FAILED, report that source as failed and do not copy topics from another source into it.
-                        - Only include topics/items that are present in the matching source's tool result.
-                        - Apply the user's filter, such as a person or topic name, separately to each source.
-                        - If no matching topics are found for a source, say that no matching topics were found in the extracted static HTML for that source.
-                        - Do not invent topics, headlines, titles, links, sections, or placeholders.
-                        """.formatted(preflightResult)));
+                        - Follow the plan results source-by-source and step-by-step.
+                        - Keep each source separate in the final answer when the plan has multiple sources.
+                        - If a step status is FAILED, report that failure for that source/step; do not copy content from another source into it.
+                        - Use only content that appears in the matching step observation.
+                        - Apply user filters, such as a person or topic name, separately to each source.
+                        - If no matching items are found for a source, say no matching items were found in that source's extracted static HTML.
+                        - If a reduction step ran, treat the reduced result as the memory-limited evidence for that step.
+                        - Do not invent topics, headlines, summaries, titles, links, sections, or placeholders.
+                        Return exactly one JSON object. If you can answer, return: {"type":"final","content":"your answer"}
+                        """.formatted(planResult)));
             }
 
             for (int step = 1; step <= MAX_ACTION_STEPS; step++) {
                 LlamaCompletionResult completion;
                 try {
-                    completion = llamaServer.completeWithTrace(loopMessages, 0.2, 1_600);
+                    int maxTokens = plan.hasSteps() ? PLAN_SYNTHESIS_MAX_TOKENS : 1_600;
+                    completion = llamaServer.completeWithTrace(loopMessages, 0.2, maxTokens);
                     addTrace(modelCallTraces, completion.getTrace());
                 } catch (LlamaCompletionException e) {
                     addTrace(modelCallTraces, e.getTrace());
@@ -85,6 +93,7 @@ public class AgentLoopService {
 
                 String rawModelOutput = cleanModelText(completion.getContent());
                 AgentActionRequest decision = parseDecision(rawModelOutput);
+
                 if (decision == null) {
                     return finish(request, rawModelOutput, clientTaskActions, modelCallTraces, webToolTraces);
                 }
@@ -135,72 +144,198 @@ public class AgentLoopService {
         }
     }
 
-    private String executePreflightPlan(
+    private ExecutionPlan buildExecutionPlan(ChatRequest request) {
+        String latest = request == null ? "" : clean(request.getLatest());
+        if (latest.isBlank()) {
+            return ExecutionPlan.empty();
+        }
+
+        WebRequestMode mode = requestedWebMode(latest);
+        boolean referencesPriorUrls = refersToPriorUrls(latest);
+        boolean hasExplicitUrls = !publicUrls(latest).isEmpty();
+
+        if (mode == WebRequestMode.NONE) {
+            return ExecutionPlan.empty();
+        }
+        if (!hasExplicitUrls && !referencesPriorUrls) {
+            return ExecutionPlan.empty();
+        }
+
+        List<String> urls = hasExplicitUrls
+                ? publicUrls(latest)
+                : publicUrls(renderContext(request));
+
+        if (urls.isEmpty()) {
+            return ExecutionPlan.empty();
+        }
+
+        List<PlanStep> steps = new ArrayList<>();
+        int requestedCount = requestedTopicCount(latest, DEFAULT_TOPIC_COUNT);
+        int stepNumber = 1;
+        for (String url : urls) {
+            if (stepNumber > MAX_PLAN_STEPS) {
+                break;
+            }
+            AgentActionRequest action = createWebAction(mode, url, latest, requestedCount);
+            steps.add(new PlanStep(
+                    stepNumber,
+                    sourceLabel(url),
+                    url,
+                    mode,
+                    action,
+                    "Fetch and analyze " + sourceLabel(url) + " using " + action.getAction()
+            ));
+            stepNumber++;
+        }
+
+        if (steps.isEmpty()) {
+            return ExecutionPlan.empty();
+        }
+
+        return new ExecutionPlan(
+                "Visible web execution plan",
+                latest,
+                "Plan, execute each web step, reduce oversized observations if needed, then synthesize the answer.",
+                steps
+        );
+    }
+
+    private AgentActionRequest createWebAction(WebRequestMode mode, String url, String latest, int requestedCount) {
+        AgentActionRequest action = new AgentActionRequest();
+        action.setType("action");
+        Map<String, Object> input = new LinkedHashMap<>();
+        input.put("url", url);
+
+        switch (mode) {
+            case TOPICS -> {
+                action.setAction("web_extract_topics");
+                input.put("maxTopics", Math.min(50, Math.max(requestedCount + 8, 15)));
+                input.put("topicHint", latest == null ? "" : latest);
+            }
+            case LINKS -> {
+                action.setAction("web_extract_links");
+                input.put("sameDomainOnly", false);
+                input.put("maxLinks", 25);
+            }
+            case OUTLINE -> action.setAction("web_page_outline");
+            case SUMMARY -> {
+                action.setAction("web_fetch_url");
+                input.put("maxChars", 12_000);
+            }
+            default -> {
+                action.setAction("web_fetch_url");
+                input.put("maxChars", 12_000);
+            }
+        }
+
+        action.setInput(input);
+        return action;
+    }
+
+    private String executePlan(
             ChatRequest request,
-            List<PlannedWebAction> plan,
+            ExecutionPlan plan,
             List<ClientTaskAction> clientTaskActions,
             List<WebToolTrace> webToolTraces,
             List<String> actionTrace
     ) {
         StringBuilder sb = new StringBuilder();
-        sb.append("Plan: Multi-source web topic extraction\n");
-        sb.append("Steps: ").append(plan.size()).append("\n\n");
+        sb.append("PLAN NAME: ").append(plan.name()).append("\n");
+        sb.append("PLAN GOAL: ").append(plan.goal()).append("\n");
+        sb.append("ORIGINAL REQUEST: ").append(plan.originalRequest()).append("\n");
+        sb.append("STEPS: ").append(plan.steps().size()).append("\n\n");
 
-        int step = 1;
-        for (PlannedWebAction planned : plan) {
-            ActionExecutionResult result = executeAndTraceAction(request, planned.action(), step, webToolTraces);
-            actionTrace.add(formatActionTrace(step, planned.action(), result));
+        for (PlanStep step : plan.steps()) {
+            ActionExecutionResult result = executeAndTraceAction(request, step.action(), step.number(), webToolTraces);
+            actionTrace.add(formatActionTrace(step.number(), step.action(), result));
             if (result.getClientTaskAction() != null) {
                 clientTaskActions.add(result.getClientTaskAction());
             }
 
-            sb.append("SOURCE ").append(step).append(": ").append(planned.label()).append("\n");
-            sb.append("URL: ").append(planned.url()).append("\n");
+            String observation = nullToEmpty(result.getObservation());
+            boolean reduced = observation.length() > PLAN_OBSERVATION_CHAR_LIMIT;
+            String evidence = reduced ? reduceObservationForPlan(observation, PLAN_OBSERVATION_CHAR_LIMIT) : observation;
+            if (reduced) {
+                addReductionTrace(step, observation.length(), evidence, webToolTraces);
+            }
+
+            sb.append("STEP ").append(step.number()).append(": ").append(step.description()).append("\n");
+            sb.append("SOURCE: ").append(step.source()).append("\n");
+            sb.append("URL: ").append(step.url()).append("\n");
+            sb.append("MODE: ").append(step.mode()).append("\n");
+            sb.append("ACTION: ").append(step.action().getAction()).append("\n");
             sb.append("STATUS: ").append(result.isSuccess() ? "SUCCESS" : "FAILED").append("\n");
             if (result.getErrorCode() != null && !result.getErrorCode().isBlank()) {
                 sb.append("ERROR_CODE: ").append(result.getErrorCode()).append("\n");
             }
-            sb.append("OBSERVATION:\n").append(result.getObservation()).append("\n\n");
-            step++;
+            if (reduced) {
+                sb.append("OBSERVATION_REDUCED: true\n");
+                sb.append("ORIGINAL_OBSERVATION_CHARS: ").append(observation.length()).append("\n");
+                sb.append("REDUCED_OBSERVATION_CHARS: ").append(evidence.length()).append("\n");
+            }
+            sb.append("OBSERVATION:\n").append(evidence).append("\n\n");
         }
+
         return sb.toString().trim();
     }
 
-    private void addPlanTrace(List<PlannedWebAction> plan, List<WebToolTrace> webToolTraces) {
+    private void addPlanTrace(ExecutionPlan plan, List<WebToolTrace> webToolTraces) {
         AgentActionRequest planAction = new AgentActionRequest();
         planAction.setType("action");
         planAction.setAction("execution_plan");
+
         Map<String, Object> input = new LinkedHashMap<>();
-        input.put("name", "Multi-source web topic extraction");
+        input.put("name", plan.name());
+        input.put("goal", plan.goal());
+        input.put("originalRequest", plan.originalRequest());
+        input.put("memoryLimitPerStepChars", PLAN_OBSERVATION_CHAR_LIMIT);
+
         List<Map<String, Object>> steps = new ArrayList<>();
-        int i = 1;
-        for (PlannedWebAction planned : plan) {
+        for (PlanStep planStep : plan.steps()) {
             Map<String, Object> step = new LinkedHashMap<>();
-            step.put("step", i++);
-            step.put("source", planned.label());
-            step.put("url", planned.url());
-            step.put("action", planned.action().getAction());
-            step.put("input", planned.action().getInput());
+            step.put("step", planStep.number());
+            step.put("description", planStep.description());
+            step.put("source", planStep.source());
+            step.put("url", planStep.url());
+            step.put("mode", String.valueOf(planStep.mode()));
+            step.put("action", planStep.action().getAction());
+            step.put("input", planStep.action().getInput());
             steps.add(step);
         }
         input.put("steps", steps);
         planAction.setInput(input);
 
-        Instant startedAt = Instant.now();
-        long startedNanos = System.nanoTime();
-        String observation;
-        try {
-            observation = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(input);
-        } catch (JsonProcessingException e) {
-            observation = String.valueOf(input);
-        }
+        String observation = toPrettyJson(input);
         webToolTraces.add(WebToolTrace.completed(
                 0,
                 "execution_plan",
                 jsonInput(planAction),
-                startedAt,
-                startedNanos,
+                Instant.now(),
+                System.nanoTime(),
                 ActionExecutionResult.success(observation)
+        ));
+    }
+
+    private void addReductionTrace(PlanStep step, int originalLength, String reduced, List<WebToolTrace> webToolTraces) {
+        AgentActionRequest reduction = new AgentActionRequest();
+        reduction.setType("action");
+        reduction.setAction("plan_reduce_observation");
+        Map<String, Object> input = new LinkedHashMap<>();
+        input.put("step", step.number());
+        input.put("source", step.source());
+        input.put("url", step.url());
+        input.put("originalChars", originalLength);
+        input.put("reducedChars", reduced.length());
+        input.put("limitChars", PLAN_OBSERVATION_CHAR_LIMIT);
+        reduction.setInput(input);
+
+        webToolTraces.add(WebToolTrace.completed(
+                step.number(),
+                "plan_reduce_observation",
+                jsonInput(reduction),
+                Instant.now(),
+                System.nanoTime(),
+                ActionExecutionResult.success("Reduced oversized plan observation for source " + step.source() + ".\n\n" + reduced)
         ));
     }
 
@@ -232,30 +367,41 @@ public class AgentLoopService {
         return result;
     }
 
-    private List<PlannedWebAction> buildPreflightTopicExtractions(String latest) {
-        if (!looksLikeTopicExtractionRequest(latest)) {
-            return List.of();
+    private WebRequestMode requestedWebMode(String text) {
+        if (text == null || text.isBlank()) {
+            return WebRequestMode.NONE;
         }
-        List<String> urls = publicUrls(latest);
-        if (urls.isEmpty()) {
-            return List.of();
-        }
+        String lower = text.toLowerCase();
+        boolean asksLinks = lower.matches(".*\\b(links?|urls?|resources?)\\b.*");
+        boolean asksOutline = lower.matches(".*\\b(outline|headings?|structure)\\b.*");
+        boolean asksTopics = lower.matches(".*\\b(headlines?|topics?|titles?|items?|articles?|stories?|sections?|posts?|entries|current items|found on|currently found|main topics?)\\b.*");
+        boolean asksSummary = lower.matches(".*\\b(summarize|summary|summaries|what'?s found|what is found|read each|go to each|each of those urls?|each url|each page)\\b.*");
+        boolean pageNavigationLanguage = lower.matches(".*\\b(go to|open|visit|check|look at|read|from|found on|currently found on)\\b.*");
 
-        int requestedCount = requestedTopicCount(latest, 10);
-        int maxTopics = Math.min(50, requestedCount + 5);
-        List<PlannedWebAction> actions = new ArrayList<>();
-        for (String url : urls) {
-            AgentActionRequest action = new AgentActionRequest();
-            action.setType("action");
-            action.setAction("web_extract_topics");
-            Map<String, Object> input = new LinkedHashMap<>();
-            input.put("url", url);
-            input.put("maxTopics", maxTopics);
-            input.put("topicHint", latest == null ? "" : latest);
-            action.setInput(input);
-            actions.add(new PlannedWebAction(sourceLabel(url), url, action));
+        if (asksLinks) {
+            return WebRequestMode.LINKS;
         }
-        return actions;
+        if (asksOutline) {
+            return WebRequestMode.OUTLINE;
+        }
+        if (asksTopics) {
+            return WebRequestMode.TOPICS;
+        }
+        if (asksSummary) {
+            return WebRequestMode.SUMMARY;
+        }
+        if (pageNavigationLanguage && (!publicUrls(text).isEmpty() || refersToPriorUrls(text))) {
+            return WebRequestMode.SUMMARY;
+        }
+        return WebRequestMode.NONE;
+    }
+
+    private boolean refersToPriorUrls(String text) {
+        if (text == null) {
+            return false;
+        }
+        String lower = text.toLowerCase();
+        return lower.matches(".*\\b(those urls?|these urls?|each url|each of those urls?|each of those pages|those pages|these pages|each source|those sources|these sources)\\b.*");
     }
 
     private List<String> publicUrls(String text) {
@@ -266,7 +412,7 @@ public class AgentLoopService {
         Matcher matcher = PUBLIC_URL_PATTERN.matcher(text);
         while (matcher.find()) {
             String url = normalizeUserUrl(matcher.group().trim());
-            while (url.endsWith(".") || url.endsWith(",") || url.endsWith(";") || url.endsWith(":")) {
+            while (!url.isBlank() && (url.endsWith(".") || url.endsWith(",") || url.endsWith(";") || url.endsWith(":"))) {
                 url = url.substring(0, url.length() - 1);
             }
             if (!url.isBlank()) {
@@ -274,11 +420,6 @@ public class AgentLoopService {
             }
         }
         return new ArrayList<>(urls);
-    }
-
-    private String firstPublicUrl(String text) {
-        List<String> urls = publicUrls(text);
-        return urls.isEmpty() ? null : urls.get(0);
     }
 
     private String normalizeUserUrl(String raw) {
@@ -313,16 +454,6 @@ public class AgentLoopService {
         }
     }
 
-    private boolean looksLikeTopicExtractionRequest(String text) {
-        if (text == null) {
-            return false;
-        }
-        String lower = text.toLowerCase();
-        boolean asksForPageItems = lower.matches(".*\\b(headlines?|topics?|titles?|items?|articles?|stories?|sections?|posts?|entries|current items|found on|currently found|what is on|what's on)\\b.*");
-        boolean pageNavigationLanguage = lower.matches(".*\\b(go to|open|visit|check|look at|read|from|found on|currently found on)\\b.*");
-        return asksForPageItems && (pageNavigationLanguage || firstPublicUrl(text) != null);
-    }
-
     private int requestedTopicCount(String text, int defaultValue) {
         if (text == null) {
             return defaultValue;
@@ -337,6 +468,52 @@ public class AgentLoopService {
             }
         }
         return defaultValue;
+    }
+
+    private String reduceObservationForPlan(String observation, int maxChars) {
+        String value = nullToEmpty(observation);
+        if (value.length() <= maxChars) {
+            return value;
+        }
+
+        StringBuilder reduced = new StringBuilder();
+        reduced.append("[Observation reduced from ").append(value.length()).append(" chars to fit the plan memory limit.]\n");
+
+        String[] lines = value.split("\\R");
+        for (String line : lines) {
+            String trimmed = line.trim();
+            if (trimmed.isBlank()) {
+                continue;
+            }
+            boolean keep = trimmed.matches("(?i)^(topics extracted from|fetched url|final url|url|status|content-type|retrieved-at|page title|extraction mode|requested|extracted|source|title|type|error|warning).*")
+                    || trimmed.matches("^\\d+\\.\\s+.*")
+                    || trimmed.startsWith("- ");
+            if (keep) {
+                appendWithinLimit(reduced, line + "\n", maxChars);
+            }
+            if (reduced.length() >= maxChars) {
+                break;
+            }
+        }
+
+        if (reduced.length() < Math.min(maxChars / 2, 4_000)) {
+            appendWithinLimit(reduced, "\n[Leading page text excerpt]\n", maxChars);
+            appendWithinLimit(reduced, value, maxChars);
+        }
+
+        return reduced.toString();
+    }
+
+    private void appendWithinLimit(StringBuilder sb, String value, int maxChars) {
+        if (sb.length() >= maxChars || value == null || value.isEmpty()) {
+            return;
+        }
+        int remaining = maxChars - sb.length();
+        if (value.length() <= remaining) {
+            sb.append(value);
+        } else if (remaining > 0) {
+            sb.append(value, 0, remaining);
+        }
     }
 
     private void addTrace(List<ModelCallTrace> traces, ModelCallTrace trace) {
@@ -362,13 +539,20 @@ public class AgentLoopService {
 
     private String buildSystemPrompt(ChatRequest request) {
         return """
-                You are Dumb Barton, a local task agent running on the user's machine. You run an agent loop.
+                You are Dumb Barton, a local task agent running on the user's machine.
+                You run an agent loop.
                 Decide whether to answer directly or call one safe action.
 
                 Current task ID: %s
-                Conversation context from frontend: %s
-                Current frontend task snapshot: %s
-                Backend task notes: %s
+
+                Conversation context from frontend:
+                %s
+
+                Current frontend task snapshot:
+                %s
+
+                Backend task notes:
+                %s
 
                 %s
 
@@ -386,6 +570,7 @@ public class AgentLoopService {
                 - Do not invent action names.
                 - Call at most one action at a time.
                 - Do not invent current web content, real headlines, article titles, topics, URLs, search results, or placeholders such as "Headline 1".
+                - The backend may execute a visible plan before this model call. If plan results are provided, use those results as the evidence and do not ask the user to run the tools manually.
                 - Use web_extract_topics when the user provides a specific public URL and asks for topics, headlines, titles, stories, posts, articles, sections, or current items found on that page. This is the general page-item extraction tool; headlines are only one kind of topic.
                 - Use web_research when the user asks for a researched answer, comparison, recommendation, or summary about current/public information and does not provide a specific URL.
                 - Use web_search only when the user asks for a list of search results, source candidates, or candidate URLs.
@@ -407,7 +592,7 @@ public class AgentLoopService {
     }
 
     private String renderContext(ChatRequest request) {
-        if (request.getContext() == null || request.getContext().isEmpty()) {
+        if (request == null || request.getContext() == null || request.getContext().isEmpty()) {
             return "(none)";
         }
         StringBuilder sb = new StringBuilder();
@@ -422,7 +607,7 @@ public class AgentLoopService {
     }
 
     private String renderTaskSnapshot(ChatRequest request) {
-        if (request.getTasks() == null || request.getTasks().isEmpty()) {
+        if (request == null || request.getTasks() == null || request.getTasks().isEmpty()) {
             return "(none)";
         }
         StringBuilder sb = new StringBuilder();
@@ -511,6 +696,14 @@ public class AgentLoopService {
         }
     }
 
+    private String toPrettyJson(Object value) {
+        try {
+            return objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(value);
+        } catch (JsonProcessingException e) {
+            return String.valueOf(value);
+        }
+    }
+
     private String formatActionTrace(int step, AgentActionRequest decision, ActionExecutionResult result) {
         return "step=" + step
                 + ", action=" + decision.getAction()
@@ -540,6 +733,40 @@ public class AgentLoopService {
         return value == null ? "" : value.trim();
     }
 
-    private record PlannedWebAction(String label, String url, AgentActionRequest action) {
+    private String nullToEmpty(String value) {
+        return value == null ? "" : value;
+    }
+
+    private enum WebRequestMode {
+        NONE,
+        TOPICS,
+        SUMMARY,
+        LINKS,
+        OUTLINE
+    }
+
+    private record ExecutionPlan(
+            String name,
+            String originalRequest,
+            String goal,
+            List<PlanStep> steps
+    ) {
+        static ExecutionPlan empty() {
+            return new ExecutionPlan("", "", "", List.of());
+        }
+
+        boolean hasSteps() {
+            return steps != null && !steps.isEmpty();
+        }
+    }
+
+    private record PlanStep(
+            int number,
+            String source,
+            String url,
+            WebRequestMode mode,
+            AgentActionRequest action,
+            String description
+    ) {
     }
 }
