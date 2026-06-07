@@ -474,7 +474,7 @@ If you have enough information to answer the user, return: {"type":"final","cont
         for (String line : lines) {
             String trimmed = line.trim();
             boolean keep = trimmed.matches("(?i)^(Topics extracted from:|Fetched URL:|Final URL:|Status:|Content-Type:|Retrieved-At:|Page title:|Extraction mode:|Requested topics/items:|Extracted topics/items:|Only \\d+|Use only|For ARTICLES|For SECTIONS|\\d+\\..*|[-*] .*)")
-                    || trimmed.matches("(?i).*(failed|error|warning|joe biden|biden).* ");
+ || trimmed.matches("(?i).*(failed|error|warning|joe biden|biden).* ");
             if (keep) {
                 if (sb.length() + trimmed.length() + 1 > maxChars) {
                     break;

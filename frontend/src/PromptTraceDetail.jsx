@@ -71,13 +71,13 @@ function ToolTraceCard({ trace, index }) {
           <h3>{displayStep}: {trace?.action || '(unknown action)'}</h3>
           <p>
             {trace?.planId ? `${trace.planId}` : 'Ad-hoc action'}
-            {trace?.planStepTitle ? ` Â· ${trace.planStepTitle}` : ''}
-            {trace?.errorCode ? ` Â· ${trace.errorCode}` : ''}
+            {trace?.planStepTitle ? ` | ${trace.planStepTitle}` : ''}
+            {trace?.errorCode ? ` | ${trace.errorCode}` : ''}
           </p>
         </div>
         <div className={`trace-status ${status}`}>
           {trace?.success ? 'success' : 'failed'}
-          {trace?.durationMs != null && ` Â· ${formatDuration(trace.durationMs)}`}
+          {trace?.durationMs != null && ` | ${formatDuration(trace.durationMs)}`}
         </div>
       </div>
       {trace?.planStepGoal && (
@@ -110,12 +110,12 @@ export function PromptTraceDetail({ task, message, messageIndex, onBack }) {
       <div className="trace-detail-header">
         <div>
           <button type="button" className="trace-back-link" onClick={onBack}>
-            â† Back to Task
+            Back to Task
           </button>
           <h2>Prompt/Response Deep Dive</h2>
           <p>
             Task: <strong>{task?.name ?? 'Unknown task'}</strong>
-            {Number.isFinite(Number(messageIndex)) ? ` Â· Agent message #${Number(messageIndex) + 1}` : ''}
+            {Number.isFinite(Number(messageIndex)) ? ` | Agent message #${Number(messageIndex) + 1}` : ''}
           </p>
         </div>
         <div className="trace-summary-card">
@@ -166,13 +166,13 @@ export function PromptTraceDetail({ task, message, messageIndex, onBack }) {
                 <div>
                   <h3>Model call {trace.callNumber || index + 1}</h3>
                   <p>
-                    {trace.messageCount ?? 0} message(s) Â· max_tokens {trace.maxTokens ?? '?'} Â· temperature {trace.temperature ?? '?'}
+                    {trace.messageCount ?? 0} message(s) | max_tokens {trace.maxTokens ?? '?'} | temperature {trace.temperature ?? '?'}
                   </p>
                 </div>
                 <div className={`trace-status ${trace.success ? 'success' : 'failure'}`}>
                   {trace.success ? 'success' : 'failed'}
-                  {trace.durationMs != null && ` Â· ${formatDuration(trace.durationMs)}`}
-                  {trace.httpStatus ? ` Â· HTTP ${trace.httpStatus}` : ''}
+                  {trace.durationMs != null && ` | ${formatDuration(trace.durationMs)}`}
+                  {trace.httpStatus ? ` | HTTP ${trace.httpStatus}` : ''}
                 </div>
               </div>
               {trace.error && <div className="trace-error-box">{trace.error}</div>}
