@@ -248,9 +248,6 @@ export function PromptTraceDetail({ task, message, messageIndex, onBack }) {
               <small>{webToolTraces.length} tool action{webToolTraces.length === 1 ? '' : 's'}</small>
             )}
           </div>
-          <button type="button" className="btn btn-secondary trace-settings-btn" onClick={openSettingsDialog}>
-            Settings
-          </button>
         </div>
       </div>
 
