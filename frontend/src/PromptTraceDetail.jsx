@@ -81,9 +81,7 @@ function ToolTraceCard({ trace, index }) {
         </div>
       </div>
       {trace?.planStepGoal && (
-        <div className="trace-error-box">
-          Goal: {trace.planStepGoal}
-        </div>
+        <div className="trace-goal-box">Goal: {trace.planStepGoal}</div>
       )}
       <TraceTextBox
         title="Action input"

@@ -947,7 +947,7 @@ body {
   white-space: pre-wrap;
 }
 
-.trace-toggle {
+.trace-goal-box { border: 1px solid #67e8f9; background: #ecfeff; color: #155e75; border-radius: 12px; padding: 12px; margin-bottom: 12px; white-space: pre-wrap; } .trace-toggle {
   white-space: nowrap;
 }
 
