@@ -24,16 +24,22 @@ function TraceTextBox({ title, subtitle, value }) {
 
   return (
     <section className="trace-text-box">
-      <div className="trace-text-box-title">
-        <div>
-          <h4>{title}</h4>
-          {subtitle && <p>{subtitle}</p>}
-        </div>
-        <button type="button" onClick={() => setExpanded((current) => !current)}>
-          {expanded ? 'Collapse' : 'Open full text'}
-        </button>
-      </div>
-      <textarea readOnly value={displayValue} onFocus={() => setExpanded(true)} />
+      {title && <h4 className="trace-text-title">{title}</h4>}
+      {subtitle && <p className="trace-text-subtitle">{subtitle}</p>}
+      <button type="button" className="trace-expand-link" onClick={() => setExpanded((current) => !current)}>
+        {expanded ? 'Collapse' : 'Open full text'}
+      </button>
+      <textarea className="trace-textarea" value={displayValue} readOnly onFocus={() => setExpanded(true)} />
+    </section>
+  )
+}
+
+function PrimaryTraceTextArea({ title, subtitle, value }) {
+  return (
+    <section className="trace-primary-text-section">
+      <h2 className="trace-primary-title">{title}</h2>
+      {subtitle && <p className="trace-primary-subtitle">{subtitle}</p>}
+      <TraceTextBox value={value} />
     </section>
   )
 }
@@ -139,27 +145,25 @@ export function PromptTraceDetail({ task, message, messageIndex, onBack }) {
           <h2>Prompt/Response Deep Dive</h2>
           <p>
             Task: <strong>{task?.name ?? 'Unknown task'}</strong>
-            {Number.isFinite(Number(messageIndex)) ? ` | Agent message #${Number(messageIndex) + 1}` : ''}
           </p>
         </div>
         <div className="trace-summary-card">
-          <span>{traces.length}</span>
-          model call{traces.length === 1 ? '' : 's'}
+          <span>{traces.length}</span> model call{traces.length === 1 ? '' : 's'}
           {webToolTraces.length > 0 && (
             <small>{webToolTraces.length} tool action{webToolTraces.length === 1 ? '' : 's'}</small>
           )}
         </div>
       </div>
 
-      <TraceTextBox
-        title="Original user prompt"
-        subtitle="The user instruction that produced this assistant response. This is shown first so the rest of Deep Dive has context."
+      <PrimaryTraceTextArea
+        title="Original Prompt"
+        subtitle="The user instruction that produced this assistant response."
         value={originalPrompt || 'Original prompt was not captured for this message.'}
       />
 
-      <TraceTextBox
-        title="Final answer shown in the task"
-        subtitle="This is the assistant message that the normal task view displays."
+      <PrimaryTraceTextArea
+        title="Final Response"
+        subtitle="The assistant response shown in the normal task view."
         value={message?.content}
       />
 
@@ -190,48 +194,39 @@ export function PromptTraceDetail({ task, message, messageIndex, onBack }) {
       ) : (
         <section className="trace-model-section">
           <h2>Model calls</h2>
-          {traces.map((trace, index) => {
-            const meta = [
-              `${trace.messageCount ?? 0} message(s)`,
-              `max_tokens ${trace.maxTokens ?? '?'}`,
-              `temperature ${trace.temperature ?? '?'}`,
-            ].join(' | ')
-            const statusText = [
-              trace.success ? 'success' : 'failed',
-              trace.durationMs != null ? formatDuration(trace.durationMs) : null,
-              trace.httpStatus ? `HTTP ${trace.httpStatus}` : null,
-            ].filter(Boolean).join(' | ')
-
-            return (
-              <article key={`${trace.callNumber ?? index}-${trace.startedAt ?? index}`} className="trace-call-card">
-                <div className="trace-call-title">
-                  <div>
-                    <h3>Model call {trace.callNumber || index + 1}</h3>
-                    <p>{meta}</p>
-                  </div>
-                  <div className={`trace-status ${trace.success ? 'success' : 'failure'}`}>
-                    {statusText}
-                  </div>
+          {traces.map((trace, index) => (
+            <article key={`${trace.callNumber ?? index}-${trace.startedAt ?? index}`} className="trace-call-card">
+              <div className="trace-call-title">
+                <div>
+                  <h3>Model call {trace.callNumber || index + 1}</h3>
+                  <p>
+                    {trace.messageCount ?? 0} message(s) | max_tokens {trace.maxTokens ?? '?'} | temperature {trace.temperature ?? '?'}
+                  </p>
                 </div>
-                {trace.error && <div className="trace-error-box">{trace.error}</div>}
-                <TraceTextBox
-                  title="Prompt sent to llama.cpp"
-                  subtitle="Exact JSON request body sent to /v1/chat/completions."
-                  value={trace.prompt}
-                />
-                <TraceTextBox
-                  title="Raw response returned by llama.cpp"
-                  subtitle="Exact HTTP response body captured before content extraction."
-                  value={trace.response}
-                />
-                <TraceTextBox
-                  title="Extracted assistant content"
-                  subtitle="The choices[0].message.content value used by the agent loop."
-                  value={trace.extractedContent}
-                />
-              </article>
-            )
-          })}
+                <div className={`trace-status ${trace.success ? 'success' : 'failure'}`}>
+                  {[trace.success ? 'success' : 'failed', trace.durationMs != null ? formatDuration(trace.durationMs) : null, trace.httpStatus ? `HTTP ${trace.httpStatus}` : null]
+                    .filter(Boolean)
+                    .join(' | ')}
+                </div>
+              </div>
+              {trace.error && <div className="trace-error-box">{trace.error}</div>}
+              <TraceTextBox
+                title="Prompt sent to llama.cpp"
+                subtitle="Exact JSON request body sent to /v1/chat/completions."
+                value={trace.prompt}
+              />
+              <TraceTextBox
+                title="Raw response returned by llama.cpp"
+                subtitle="Exact HTTP response body captured before content extraction."
+                value={trace.response}
+              />
+              <TraceTextBox
+                title="Extracted assistant content"
+                subtitle="The choices[0].message.content value used by the agent loop."
+                value={trace.extractedContent}
+              />
+            </article>
+          ))}
         </section>
       )}
     </div>
