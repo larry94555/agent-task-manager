@@ -21,9 +21,10 @@ function TraceTextBox({ title, subtitle, value }) {
   const [expanded, setExpanded] = useState(false)
   const text = String(value ?? '')
   const displayValue = expanded ? text : previewText(text)
+
   return (
     <section className="trace-text-box">
-      <div className="trace-text-header">
+      <div className="trace-text-box-title">
         <div>
           <h4>{title}</h4>
           {subtitle && <p>{subtitle}</p>}
@@ -37,12 +38,34 @@ function TraceTextBox({ title, subtitle, value }) {
   )
 }
 
+function findOriginalPrompt(task, message, messageIndex) {
+  if (typeof message?.originalPrompt === 'string' && message.originalPrompt.trim()) {
+    return message.originalPrompt
+  }
+
+  const messages = Array.isArray(task?.messages) ? task.messages : []
+  const index = Number(messageIndex)
+  if (Number.isFinite(index)) {
+    for (let i = Math.min(index - 1, messages.length - 1); i >= 0; i -= 1) {
+      const candidate = messages[i]
+      if (candidate?.role === 'user' && typeof candidate.content === 'string' && candidate.content.trim()) {
+        return candidate.content
+      }
+    }
+  }
+
+  return ''
+}
+
 function PlanTraceCard({ trace, index }) {
+  const planLabel = trace?.displayStep || trace?.planId || `Plan ${index + 1}`
+  const title = trace?.planTitle || 'Execution plan'
+
   return (
     <article className="trace-call-card plan-trace-card">
       <div className="trace-call-title">
         <div>
-          <h3>{trace?.displayStep || trace?.planId || `Plan ${index + 1}`}: {trace?.planTitle || 'Execution plan'}</h3>
+          <h3>{planLabel}: {title}</h3>
           <p>Visible plan summary generated before tool execution.</p>
         </div>
         <div className="trace-status success">plan</div>
@@ -64,24 +87,26 @@ function PlanTraceCard({ trace, index }) {
 function ToolTraceCard({ trace, index }) {
   const displayStep = trace?.displayStep || (trace?.planStepId ? `Step ${trace.planStepId}` : `Tool action ${index + 1}`)
   const status = trace?.success ? 'success' : 'failure'
+  const meta = [trace?.planId || 'Ad-hoc action', trace?.planStepTitle, trace?.errorCode]
+    .filter(Boolean)
+    .join(' | ')
+  const statusText = [trace?.success ? 'success' : 'failed', trace?.durationMs != null ? formatDuration(trace.durationMs) : null]
+    .filter(Boolean)
+    .join(' | ')
+
   return (
     <article className="trace-call-card">
       <div className="trace-call-title">
         <div>
           <h3>{displayStep}: {trace?.action || '(unknown action)'}</h3>
-          <p>
-            {trace?.planId ? `${trace.planId}` : 'Ad-hoc action'}
-            {trace?.planStepTitle ? ` | ${trace.planStepTitle}` : ''}
-            {trace?.errorCode ? ` | ${trace.errorCode}` : ''}
-          </p>
+          {meta && <p>{meta}</p>}
         </div>
-        <div className={`trace-status ${status}`}>
-          {trace?.success ? 'success' : 'failed'}
-          {trace?.durationMs != null && ` | ${formatDuration(trace.durationMs)}`}
-        </div>
+        <div className={`trace-status ${status}`}>{statusText}</div>
       </div>
       {trace?.planStepGoal && (
-        <div className="trace-goal-box">Goal: {trace.planStepGoal}</div>
+        <div className="trace-goal-box">
+          Goal: {trace.planStepGoal}
+        </div>
       )}
       <TraceTextBox
         title="Action input"
@@ -102,6 +127,7 @@ export function PromptTraceDetail({ task, message, messageIndex, onBack }) {
   const webToolTraces = Array.isArray(message?.webToolTraces) ? message.webToolTraces : []
   const planTraces = webToolTraces.filter((trace) => trace?.traceType === 'plan' || trace?.action === 'execution_plan')
   const toolTraces = webToolTraces.filter((trace) => !(trace?.traceType === 'plan' || trace?.action === 'execution_plan'))
+  const originalPrompt = findOriginalPrompt(task, message, messageIndex)
 
   return (
     <div className="trace-detail-view">
@@ -117,12 +143,19 @@ export function PromptTraceDetail({ task, message, messageIndex, onBack }) {
           </p>
         </div>
         <div className="trace-summary-card">
-          <span>{traces.length}</span> model call{traces.length === 1 ? '' : 's'}
+          <span>{traces.length}</span>
+          model call{traces.length === 1 ? '' : 's'}
           {webToolTraces.length > 0 && (
             <small>{webToolTraces.length} tool action{webToolTraces.length === 1 ? '' : 's'}</small>
           )}
         </div>
       </div>
+
+      <TraceTextBox
+        title="Original user prompt"
+        subtitle="The user instruction that produced this assistant response. This is shown first so the rest of Deep Dive has context."
+        value={originalPrompt || 'Original prompt was not captured for this message.'}
+      />
 
       <TraceTextBox
         title="Final answer shown in the task"
@@ -152,45 +185,53 @@ export function PromptTraceDetail({ task, message, messageIndex, onBack }) {
 
       {traces.length === 0 ? (
         <div className="trace-empty-state">
-          No llama.cpp prompt trace was attached to this message.
-          New responses will include traces after the backend patch is running.
+          No llama.cpp prompt trace was attached to this message. New responses will include traces after the backend patch is running.
         </div>
       ) : (
         <section className="trace-model-section">
           <h2>Model calls</h2>
-          {traces.map((trace, index) => (
-            <article key={`${trace.callNumber ?? index}-${trace.startedAt ?? index}`} className="trace-call-card">
-              <div className="trace-call-title">
-                <div>
-                  <h3>Model call {trace.callNumber || index + 1}</h3>
-                  <p>
-                    {trace.messageCount ?? 0} message(s) | max_tokens {trace.maxTokens ?? '?'} | temperature {trace.temperature ?? '?'}
-                  </p>
+          {traces.map((trace, index) => {
+            const meta = [
+              `${trace.messageCount ?? 0} message(s)`,
+              `max_tokens ${trace.maxTokens ?? '?'}`,
+              `temperature ${trace.temperature ?? '?'}`,
+            ].join(' | ')
+            const statusText = [
+              trace.success ? 'success' : 'failed',
+              trace.durationMs != null ? formatDuration(trace.durationMs) : null,
+              trace.httpStatus ? `HTTP ${trace.httpStatus}` : null,
+            ].filter(Boolean).join(' | ')
+
+            return (
+              <article key={`${trace.callNumber ?? index}-${trace.startedAt ?? index}`} className="trace-call-card">
+                <div className="trace-call-title">
+                  <div>
+                    <h3>Model call {trace.callNumber || index + 1}</h3>
+                    <p>{meta}</p>
+                  </div>
+                  <div className={`trace-status ${trace.success ? 'success' : 'failure'}`}>
+                    {statusText}
+                  </div>
                 </div>
-                <div className={`trace-status ${trace.success ? 'success' : 'failure'}`}>
-                  {trace.success ? 'success' : 'failed'}
-                  {trace.durationMs != null && ` | ${formatDuration(trace.durationMs)}`}
-                  {trace.httpStatus ? ` | HTTP ${trace.httpStatus}` : ''}
-                </div>
-              </div>
-              {trace.error && <div className="trace-error-box">{trace.error}</div>}
-              <TraceTextBox
-                title="Prompt sent to llama.cpp"
-                subtitle="Exact JSON request body sent to /v1/chat/completions."
-                value={trace.prompt}
-              />
-              <TraceTextBox
-                title="Raw response returned by llama.cpp"
-                subtitle="Exact HTTP response body captured before content extraction."
-                value={trace.response}
-              />
-              <TraceTextBox
-                title="Extracted assistant content"
-                subtitle="The choices[0].message.content value used by the agent loop."
-                value={trace.extractedContent}
-              />
-            </article>
-          ))}
+                {trace.error && <div className="trace-error-box">{trace.error}</div>}
+                <TraceTextBox
+                  title="Prompt sent to llama.cpp"
+                  subtitle="Exact JSON request body sent to /v1/chat/completions."
+                  value={trace.prompt}
+                />
+                <TraceTextBox
+                  title="Raw response returned by llama.cpp"
+                  subtitle="Exact HTTP response body captured before content extraction."
+                  value={trace.response}
+                />
+                <TraceTextBox
+                  title="Extracted assistant content"
+                  subtitle="The choices[0].message.content value used by the agent loop."
+                  value={trace.extractedContent}
+                />
+              </article>
+            )
+          })}
         </section>
       )}
     </div>
