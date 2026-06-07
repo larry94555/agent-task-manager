@@ -18,7 +18,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
+import java.util.ArrayList; import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -1043,16 +1043,16 @@ public String webSearch(String query, int maxResults) throws IOException, Interr
             throw new IOException("HTTP " + status + " while fetching " + safeUri);
         }
 
-        byte[] body = response.body() == null ? new byte[0] : response.body();
-        if (body.length > WebToolPolicy.MAX_RESPONSE_BYTES) {
-            throw new IOException("Response is too large. Limit is " + WebToolPolicy.MAX_RESPONSE_BYTES + " bytes.");
-        }
-
         String contentType = response.headers().firstValue("content-type").orElse("unknown");
         if (!isAllowedContentType(contentType)) {
             throw new IOException("Unsupported content type for read-only text fetch: " + contentType);
         }
-
+        byte[] body = response.body() == null ? new byte[0] : response.body();
+        if (body.length > WebToolPolicy.MAX_RESPONSE_BYTES) {
+            log.info("Response is too large for full fetch (" + body.length + " bytes). Truncating to " + WebToolPolicy.MAX_RESPONSE_BYTES + " bytes for read-only extraction.");
+            body = Arrays.copyOf(body, WebToolPolicy.MAX_RESPONSE_BYTES);
+            contentType = contentType + "; truncated=true; original-bytes=" + response.body().length;
+        }
         return new RawResponse(safeUri, status, contentType, body);
     }
 
