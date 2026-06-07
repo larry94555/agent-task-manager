@@ -1069,3 +1069,108 @@ body {
   background: transparent;
 }
 /* End Deep Dive textarea toggle placement overrides. */
+
+/* Deep View settings and preview overrides */
+.trace-plain-label {
+  color: #111827;
+  font-size: 0.95rem;
+  font-weight: 700;
+  margin: 0.85rem 0 0.35rem;
+}
+
+.trace-textbox-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.trace-text-box {
+  margin-bottom: 0;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.trace-toggle.trace-toggle-attached {
+  margin-top: 0;
+  align-self: flex-start;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  border-top: 0;
+  background: #ffffff;
+  color: #111827;
+  border-left: 1px solid #cbd5e1;
+  border-right: 1px solid #cbd5e1;
+  border-bottom: 1px solid #cbd5e1;
+  padding: 0.4rem 0.65rem;
+  font-size: 0.86rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.trace-toggle.trace-toggle-attached:hover {
+  background: #f8fafc;
+}
+
+.trace-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.trace-settings-btn {
+  white-space: nowrap;
+}
+
+.trace-settings-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.38);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.trace-settings-dialog {
+  width: min(420px, calc(100vw - 2rem));
+  background: #ffffff;
+  color: #111827;
+  border: 1px solid #d1d5db;
+  border-radius: 14px;
+  box-shadow: 0 18px 50px rgba(15, 23, 42, 0.24);
+  padding: 1rem;
+}
+
+.trace-settings-dialog h3 {
+  margin: 0 0 0.9rem;
+  color: #111827;
+}
+
+.trace-settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.trace-settings-field span {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: #111827;
+}
+
+.trace-settings-field input {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 0.55rem 0.7rem;
+  font-size: 0.95rem;
+  color: #111827;
+  background: #ffffff;
+}
+
+.trace-settings-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  margin-top: 1rem;
+}

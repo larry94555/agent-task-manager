@@ -8,6 +8,58 @@ import { ScriptRunner } from './ScriptRunner'
 const API_URL = '/api/chat'
 const SESSION_FILE_VERSION = 3
 const SESSION_FILE_APP = 'agent-task-manager'
+const UI_SETTINGS_STORAGE_KEY = 'dumb-barton-ui-settings'
+const DEFAULT_DEEP_DIVE_PREVIEW_CHARS = 160
+
+function normalizeUiSettings(settings) {
+  const raw = Number(settings?.deepDivePreviewChars)
+  const deepDivePreviewChars = Number.isFinite(raw)
+    ? Math.min(600, Math.max(40, Math.round(raw)))
+    : DEFAULT_DEEP_DIVE_PREVIEW_CHARS
+  return { deepDivePreviewChars }
+}
+
+function readUiSettings() {
+  try {
+    const raw = window.localStorage.getItem(UI_SETTINGS_STORAGE_KEY)
+    if (!raw) return normalizeUiSettings({})
+    return normalizeUiSettings(JSON.parse(raw))
+  } catch {
+    return normalizeUiSettings({})
+  }
+}
+
+function writeUiSettings(settings) {
+  const normalized = normalizeUiSettings(settings)
+  window.localStorage.setItem(UI_SETTINGS_STORAGE_KEY, JSON.stringify(normalized))
+  return normalized
+}
+
+function SettingsDialog({ open, draftValue, onDraftChange, onCancel, onKeep }) {
+  if (!open) return null
+  return (
+    <div className="trace-settings-backdrop" role="dialog" aria-modal="true" aria-label="Deep View settings">
+      <div className="trace-settings-dialog">
+        <h3>Settings</h3>
+        <label className="trace-settings-field">
+          <span>Deep View preview length</span>
+          <input
+            type="number"
+            min="40"
+            max="600"
+            step="10"
+            value={draftValue}
+            onChange={(event) => onDraftChange(event.target.value)}
+          />
+        </label>
+        <div className="trace-settings-actions">
+          <button type="button" className="btn btn-secondary" onClick={onCancel}>Cancel</button>
+          <button type="button" className="btn btn-primary" onClick={onKeep}>Keep</button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 function formatDuration(ms) {
   if (ms == null || Number.isNaN(ms)) return ''
@@ -603,11 +655,30 @@ function App() {
   const [nextTaskId, setNextTaskId] = useState(1)
   const [selectedTaskId, setSelectedTaskId] = useState(null)
   const [scriptStatus, setScriptStatus] = useState('')
+const [uiSettings, setUiSettings] = useState(readUiSettings)
+const [settingsOpen, setSettingsOpen] = useState(false)
+const [settingsDraft, setSettingsDraft] = useState(() => String(readUiSettings().deepDivePreviewChars))
   const abortControllers = useRef({})
   const loadSessionInputRef = useRef(null)
   const tasksRef = useRef(tasks)
   const nextTaskIdRef = useRef(nextTaskId)
   const selectedTaskIdRef = useRef(selectedTaskId)
+const openSettingsDialog = useCallback(() => {
+  setSettingsDraft(String(uiSettings.deepDivePreviewChars))
+  setSettingsOpen(true)
+}, [uiSettings])
+
+const closeSettingsDialog = useCallback(() => {
+  setSettingsDraft(String(uiSettings.deepDivePreviewChars))
+  setSettingsOpen(false)
+}, [uiSettings])
+
+const keepSettingsDialog = useCallback(() => {
+  const next = writeUiSettings({ deepDivePreviewChars: settingsDraft })
+  setUiSettings(next)
+  setSettingsDraft(String(next.deepDivePreviewChars))
+  setSettingsOpen(false)
+}, [settingsDraft])
 
   useEffect(() => {
     tasksRef.current = tasks
@@ -979,6 +1050,7 @@ function App() {
           <button className="btn btn-secondary" onClick={saveSession}>Save Session</button>
           <button className="btn btn-secondary" onClick={openLoadSessionPicker} disabled={hasActiveRequests}>Load Session</button>
           <button className="btn btn-secondary" onClick={saveSelectedTaskAsScript} disabled={saveTaskScriptDisabled}>Save Task Script</button>
+<button className="btn btn-secondary" onClick={openSettingsDialog}>Settings</button>
           <input
             ref={loadSessionInputRef}
             className="session-file-input"
@@ -990,7 +1062,15 @@ function App() {
         </div>
       </header>
 
-      <div className="main-layout">
+      <SettingsDialog
+  open={settingsOpen}
+  draftValue={settingsDraft}
+  onDraftChange={setSettingsDraft}
+  onCancel={closeSettingsDialog}
+  onKeep={keepSettingsDialog}
+/>
+
+<div className="main-layout">
         <aside className="task-list">
           <h2>Agent Tasks</h2>
           {tasks.length === 0 ? (
